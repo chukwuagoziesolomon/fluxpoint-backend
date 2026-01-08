@@ -22,15 +22,27 @@ class RLExecutionTrainer:
     def __init__(
         self,
         model_name: str = "tce_execution",
-        initial_balance: float = 10000
+        initial_balance: float = 10000,
+        risk_percentage: float = 1.0,
+        symbol: str = "EURUSD",
+        require_candlestick_pattern: bool = True,
+        enforce_risk_management: bool = True
     ):
         """
         Args:
             model_name: Name for the RL model
             initial_balance: Starting balance for simulation
+            risk_percentage: % of account to risk per trade
+            symbol: Trading pair (e.g., 'EURUSD')
+            require_candlestick_pattern: Enforce candlestick confirmation
+            enforce_risk_management: Enforce risk management rules
         """
         self.model_name = model_name
         self.initial_balance = initial_balance
+        self.risk_percentage = risk_percentage
+        self.symbol = symbol
+        self.require_candlestick_pattern = require_candlestick_pattern
+        self.enforce_risk_management = enforce_risk_management
         self.agent = None
     
     def prepare_training_data(
@@ -64,21 +76,31 @@ class RLExecutionTrainer:
             if s.get('timestamp_idx', 0) >= split_idx
         ]
         
-        # Create environments
+        # Create environments with risk management enabled
         train_env = create_execution_env(
             candles=train_candles,
             valid_setups=train_setups,
-            initial_balance=self.initial_balance
+            initial_balance=self.initial_balance,
+            risk_percentage=self.risk_percentage,
+            symbol=self.symbol,
+            require_candlestick_pattern=self.require_candlestick_pattern,
+            enforce_risk_management=self.enforce_risk_management
         )
         
         eval_env = create_execution_env(
             candles=eval_candles,
             valid_setups=eval_setups,
-            initial_balance=self.initial_balance
+            initial_balance=self.initial_balance,
+            risk_percentage=self.risk_percentage,
+            symbol=self.symbol,
+            require_candlestick_pattern=self.require_candlestick_pattern,
+            enforce_risk_management=self.enforce_risk_management
         )
         
         print(f"Training data: {len(train_candles)} candles, {len(train_setups)} setups")
         print(f"Evaluation data: {len(eval_candles)} candles, {len(eval_setups)} setups")
+        print(f"Risk management: enforce={self.enforce_risk_management}, candlestick={self.require_candlestick_pattern}")
+        print(f"Risk per trade: {self.risk_percentage}% of account")
         
         return train_env, eval_env
     
