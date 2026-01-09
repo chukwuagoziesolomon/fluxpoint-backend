@@ -29,73 +29,79 @@ def valid_fib(swing) -> bool:
 
 
 def is_rejection_candle(candle: Candle, direction: str) -> bool:
+    """Relaxed: Just needs some lower/upper wick"""
     body = abs(candle.close - candle.open)
     wick_up = candle.high - max(candle.open, candle.close)
     wick_down = min(candle.open, candle.close) - candle.low
 
     if direction == "BUY":
-        return wick_down > body * 1.5 and candle.close > candle.open
+        return wick_down > body * 0.5 and candle.close > candle.open
     else:
-        return wick_up > body * 1.5 and candle.close < candle.open
+        return wick_up > body * 0.5 and candle.close < candle.open
 
 
-# Candlestick pattern detection
+# Candlestick pattern detection - RELAXED
 def is_bullish_pin_bar(candle: Candle) -> bool:
+    """Relaxed: Lower wick > 1x body (not 2x)"""
     body = abs(candle.close - candle.open)
     lower_wick = min(candle.open, candle.close) - candle.low
     upper_wick = candle.high - max(candle.open, candle.close)
-    return lower_wick >= body * 2 and upper_wick <= body and candle.close > candle.open
+    return lower_wick >= body * 1.0 and upper_wick <= body and candle.close > candle.open
 
 
 def is_bearish_pin_bar(candle: Candle) -> bool:
+    """Relaxed: Upper wick > 1x body (not 2x)"""
     body = abs(candle.close - candle.open)
     upper_wick = candle.high - max(candle.open, candle.close)
     lower_wick = min(candle.open, candle.close) - candle.low
-    return upper_wick >= body * 2 and lower_wick <= body and candle.close < candle.open
+    return upper_wick >= body * 1.0 and lower_wick <= body and candle.close < candle.open
 
 
 def is_bullish_engulfing(prev: Candle, curr: Candle) -> bool:
-    return (prev.close < prev.open and
-            curr.close > curr.open and
-            curr.open < prev.close and
-            curr.close > prev.open)
+    """Relaxed: Just needs current to be bigger and close higher"""
+    prev_body = abs(prev.close - prev.open)
+    curr_body = abs(curr.close - curr.open)
+    return (prev.close < prev.open and  # Previous bearish
+            curr.close > curr.open and  # Current bullish
+            curr_body > prev_body * 0.5)  # Current body at least half
 
 
 def is_bearish_engulfing(prev: Candle, curr: Candle) -> bool:
-    return (prev.close > prev.open and
-            curr.close < curr.open and
-            curr.open > prev.close and
-            curr.close < prev.open)
+    """Relaxed: Just needs current to be bigger and close lower"""
+    prev_body = abs(prev.close - prev.open)
+    curr_body = abs(curr.close - curr.open)
+    return (prev.close > prev.open and  # Previous bullish
+            curr.close < curr.open and  # Current bearish
+            curr_body > prev_body * 0.5)  # Current body at least half
 
 
 def is_morning_star(c1: Candle, c2: Candle, c3: Candle) -> bool:
-    return (c1.close < c1.open and
-            abs(c2.close - c2.open) < abs(c1.close - c1.open) * 0.5 and
-            c3.close > c3.open and
-            c3.close > (c1.open + c1.close) / 2)
+    """Relaxed: Just needs reversal direction"""
+    return (c1.close < c1.open and  # Bearish
+            c3.close > c3.open)  # Bullish
 
 
 def is_evening_star(c1: Candle, c2: Candle, c3: Candle) -> bool:
-    return (c1.close > c1.open and
-            abs(c2.close - c2.open) < abs(c1.close - c1.open) * 0.5 and
-            c3.close < c3.open and
-            c3.close < (c1.open + c1.close) / 2)
+    """Relaxed: Just needs reversal direction"""
+    return (c1.close > c1.open and  # Bullish
+            c3.close < c3.open)  # Bearish
 
 
-def is_tweezer_bottom(prev: Candle, curr: Candle, tolerance: float = 0.0002) -> bool:
-    return abs(prev.low - curr.low) <= tolerance
+def is_tweezer_bottom(prev: Candle, curr: Candle, tolerance: float = 0.001) -> bool:
+    """Relaxed: Lows within 0.1% of each other"""
+    return abs(prev.low - curr.low) / max(prev.low, curr.low, 0.00001) < tolerance
 
 
-def is_tweezer_top(prev: Candle, curr: Candle, tolerance: float = 0.0002) -> bool:
-    return abs(prev.high - curr.high) <= tolerance
+def is_tweezer_top(prev: Candle, curr: Candle, tolerance: float = 0.001) -> bool:
+    """Relaxed: Highs within 0.1% of each other"""
+    return abs(prev.high - curr.high) / max(prev.high, curr.high, 0.00001) < tolerance
 
 
 def is_one_white_soldier(prev: Candle, curr: Candle) -> bool:
-    # Simplified: strong bullish candle after bearish
+    """Relaxed: Current just needs to be bullish and close higher than prev"""
     return (prev.close < prev.open and
             curr.close > curr.open and
-            curr.close > prev.high and
-            curr.open < prev.close)
+            curr.close > prev.open)
 
 
 def is_one_black_crow(prev: Candle, curr: Candle) -> bool:
