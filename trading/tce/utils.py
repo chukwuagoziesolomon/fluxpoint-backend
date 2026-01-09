@@ -3,19 +3,91 @@ from .types import Indicators, Candle
 
 
 def is_uptrend(ind: Indicators) -> bool:
-    """Uptrend: MA alignment + at least 2 of 3 slopes positive (realistic)."""
-    return (
-        ind.ma6 > ind.ma18 > ind.ma50 > ind.ma200
-        and sum([ind.slope6 > 0, ind.slope18 > 0, ind.slope50 > 0]) >= 2  # At least 2/3 positive
+    """
+    Uptrend: Check MA alignment (3 of 4 MAs in order) + at least 2 of 3 slopes positive.
+    This is more realistic for choppy pairs like USDJPY that don't have perfect alignment.
+    
+    Requires 3 of 4 MAs to show correct ordering (not all 4 strictly):
+    - MA6 > MA18 > MA50 (core momentum)
+    - OR MA18 > MA50 > MA200 (longer-term trend)
+    AND at least 2 of 3 slopes must be positive.
+    """
+    # Check if fast MAs are above slow MAs (core uptrend)
+    ma_check = (
+        (ind.ma6 > ind.ma18 and ind.ma18 > ind.ma50) or  # Short-medium alignment
+        (ind.ma18 > ind.ma50 and ind.ma50 > ind.ma200)   # Medium-long alignment
     )
+    
+    # Check if at least 2 of 3 slopes are positive
+    slopes_positive = sum([ind.slope6 > 0, ind.slope18 > 0, ind.slope50 > 0]) >= 2
+    
+    return ma_check and slopes_positive
+
+
+def is_uptrend_with_structure(ind: Indicators, lows: List[float]) -> bool:
+    """
+    Uptrend with swing structure validation.
+    UPTREND = MA alignment + slopes + HIGHER LOWS.
+    The second dip/test of the MA must not go as deep as the first test.
+    This confirms the trend is getting stronger (shallower pullbacks).
+    """
+    # First check basic MA alignment and slopes
+    if not is_uptrend(ind):
+        return False
+    
+    # Second check: higher lows (swing structure)
+    # For uptrend, recent lows should be progressively higher
+    if len(lows) < 3:
+        return False
+    
+    # Check that at least 60% of recent moves have higher lows
+    recent = lows[-10:] if len(lows) >= 10 else lows[-3:]
+    higher_count = sum(1 for i in range(1, len(recent)) if recent[i] > recent[i - 1])
+    return higher_count >= len(recent) * 0.6  # At least 60% upward
 
 
 def is_downtrend(ind: Indicators) -> bool:
-    """Downtrend: MA alignment + at least 2 of 3 slopes negative (realistic)."""
-    return (
-        ind.ma200 > ind.ma50 > ind.ma18 > ind.ma6
-        and sum([ind.slope6 < 0, ind.slope18 < 0, ind.slope50 < 0]) >= 2  # At least 2/3 negative
+    """
+    Downtrend: Check MA alignment (3 of 4 MAs in reverse) + at least 2 of 3 slopes negative.
+    This is more realistic for choppy pairs that don't have perfect alignment.
+    
+    Requires 3 of 4 MAs to show correct ordering (not all 4 strictly):
+    - MA50 > MA18 > MA6 (core momentum)
+    - OR MA200 > MA50 > MA18 (longer-term trend)
+    AND at least 2 of 3 slopes must be negative.
+    """
+    # Check if slow MAs are above fast MAs (core downtrend)
+    ma_check = (
+        (ind.ma50 > ind.ma18 and ind.ma18 > ind.ma6) or      # Short-medium alignment
+        (ind.ma200 > ind.ma50 and ind.ma50 > ind.ma18)       # Medium-long alignment
     )
+    
+    # Check if at least 2 of 3 slopes are negative
+    slopes_negative = sum([ind.slope6 < 0, ind.slope18 < 0, ind.slope50 < 0]) >= 2
+    
+    return ma_check and slopes_negative
+
+
+def is_downtrend_with_structure(ind: Indicators, highs: List[float]) -> bool:
+    """
+    Downtrend with swing structure validation.
+    DOWNTREND = MA alignment + slopes + LOWER HIGHS.
+    The second rally/test of the MA must not go as high as the first test.
+    This confirms the trend is getting stronger (lower retracements).
+    """
+    # First check basic MA alignment and slopes
+    if not is_downtrend(ind):
+        return False
+    
+    # Second check: lower highs (swing structure)
+    # For downtrend, recent highs should be progressively lower
+    if len(highs) < 3:
+        return False
+    
+    # Check that at least 60% of recent moves have lower highs
+    recent = highs[-10:] if len(highs) >= 10 else highs[-3:]
+    lower_count = sum(1 for i in range(1, len(recent)) if recent[i] < recent[i - 1])
+    return lower_count >= len(recent) * 0.6  # At least 60% downward
 
 
 def valid_fib(swing) -> bool:

@@ -1,0 +1,113 @@
+"""
+EXPLANATION: How TCE Validation Works with MA18, MA50, MA200
+
+The validation checks 7 rules in sequence. Here's what happens:
+
+1️⃣  TREND CONFIRMATION (Required!)
+   ├─ Uptrend: MA6 > MA18 > MA50 > MA200 (all 4 MAs in order)
+   ├─ Downtrend: MA200 > MA50 > MA18 > MA6 (all 4 MAs in reverse)
+   └─ AND at least 2 of 3 slopes positive (MA6, MA18, MA50)
+   
+   ⚠️  USDJPY PROBLEM: The MA alignment might be NEUTRAL most of the time
+       Example of NEUTRAL (FAILS trend check):
+       - MA18: 110.50
+       - MA50: 110.45  ← Should be > MA18 for uptrend, but it's less!
+       - MA200: 110.48  ← Wrong order!
+       This happens in sideways/choppy markets.
+
+2️⃣  FIBONACCI VALIDATION
+   └─ Price must retrace 38.2%, 50%, or 61.8% below the MA
+   
+3️⃣  AT MA LEVEL (Dynamic Support/Resistance)
+   ├─ Price must be within 5% of MA6, MA18, MA50, or MA200
+   ├─ For BUY: price.low ≤ MA and (MA - price.low) / MA < 0.05
+   ├─ For SELL: price.high ≥ MA and (price.high - MA) / MA < 0.05
+   └─ This is the "entry point" - price bouncing off the MA
+   
+4️⃣  MA RETEST (Price bounced off MA before)
+   ├─ Current candle must be near an MA
+   ├─ That same MA must have been tested in the last 20 candles
+   ├─ Example:
+   │  Candle 1 (20 candles ago): low=110.45, high=110.55, MA18=110.50 ✓ Touched MA18
+   │  Candle 20 (now):           low=110.48, MA18=110.50 ← Retesting same MA18!
+   └─ This confirms the MA is acting as support/resistance
+
+5️⃣  CANDLESTICK PATTERN
+   └─ Pin bar, engulfing, rejection candle, etc. at the MA level
+   
+6️⃣  MULTI-TIMEFRAME (Empty for H1)
+7️⃣  CORRELATION (Empty for single pair)
+
+================================================================================
+WHY USDJPY HAS 0 SETUPS:
+================================================================================
+
+Most likely: USDJPY data shows NEUTRAL MA alignment (MAs not in proper order)
+
+Example from USDJPY (hypothetical):
+  When price is bouncing:
+  - MA200 = 110.500  (slowest)
+  - MA50  = 110.492  (medium)
+  - MA18  = 110.485  (medium-fast)
+  - MA6   = 110.480  (fastest)
+  
+  This is NEUTRAL! Not uptrend (need 6 > 18 > 50 > 200) and not downtrend!
+  Result: ❌ Fails Rule #1 (Trend Confirmation) → Setup invalid
+
+================================================================================
+HOW TO FIX:
+================================================================================
+
+For USDJPY, we might need to:
+
+Option A: RELAX the trend confirmation
+  Current: MA6 > MA18 > MA50 > MA200 (strict perfect order)
+  Relaxed: Check if MAs are "mostly" aligned (allow 1-2 out of order)
+  
+Option B: CHECK WHY USDJPY DATA IS NEUTRAL
+  - Is it a choppy pair? (USDJPY is known to be range-bound)
+  - Check longer timeframes (H4, D1) for trend
+  - Or skip USDJPY and focus on trending pairs
+
+Option C: REQUIRE LESS STRICT TREND
+  Current: Need 2 of 3 slopes positive for uptrend
+  Could change to: Just check if MA6 > MA18 (basic alignment)
+  
+================================================================================
+VERIFICATION CHECKLIST:
+================================================================================
+
+✅ System correctly checks:
+  • MA6 > MA18 > MA50 > MA200 for uptrends
+  • MA200 > MA50 > MA18 > MA6 for downtrends
+  • Price.low is within 5% of a MA (for BUY)
+  • Same MA was touched in last 20 candles (retest)
+  • Candlestick pattern confirms the bounce
+
+The logic is CORRECT. The issue is USDJPY doesn't have proper MA alignment.
+"""
+
+print(__doc__)
+
+# Summary Table
+print("\nQUICK REFERENCE: What Each MA Level Represents\n")
+print("┌─────────┬──────────────────────────────────────┐")
+print("│   MA    │  Represents                          │")
+print("├─────────┼──────────────────────────────────────┤")
+print("│  MA6    │  Short-term trend (next 6 hours)    │")
+print("│  MA18   │  Medium-term trend (18 hours)       │")
+print("│  MA50   │  Longer-term trend (50 hours)       │")
+print("│ MA200   │  Long-term trend (200 hours = 8+ days)│")
+print("└─────────┴──────────────────────────────────────┘")
+
+print("\nUPTREND CONDITION:")
+print("  MA6 > MA18 > MA50 > MA200")
+print("  └─ Fast MAs above slow MAs = Price moving up\n")
+
+print("DOWNTREND CONDITION:")
+print("  MA200 > MA50 > MA18 > MA6")
+print("  └─ Slow MAs above fast MAs = Price moving down\n")
+
+print("NEUTRAL (NO TREND):")
+print("  Anything else (mixed order) = No clear trend")
+print("  └─ This is why USDJPY has 0 setups!\n")

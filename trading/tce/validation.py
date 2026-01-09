@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from .types import Candle, Indicators, Swing, MarketStructure, HigherTFCandle
 from .utils import has_candlestick_confirmation, valid_fib
 from .sr import at_ma_level, has_ma_retest
@@ -9,7 +9,13 @@ from .risk_management import (
     validate_risk_management,
     calculate_position_size,
     get_pip_value_per_lot
-)
+)from .order_placement import (
+    calculate_entry_order_price,
+    create_pending_order,
+    validate_order_placement,
+    get_order_type
+)from .correlation import validate_correlation_directions
+from .sr_detection import get_sr_analysis
 
 
 def higher_timeframe_confirmed(
@@ -25,19 +31,32 @@ def higher_timeframe_confirmed(
 
 
 def correlation_confirmed(
-    correlations: Dict[str, float],
-    threshold: float = 0.6
+    correlations: Dict[str, Tuple[float, str]],
+    direction: str,
+    threshold: float = 0.5
 ) -> bool:
     """
-    correlations = {
-        'EURJPY': 0.72,
-        'EURGBP': 0.65
-    }
+    Validate correlation pairs using correlation coefficients.
+    
+    Args:
+        correlations: {
+            'GBPUSD': (0.72, 'UP'),      # coefficient, trend_direction
+            'GBPJPY': (-0.65, 'DOWN'),   # Negative = opposite direction
+        }
+        direction: Current setup direction ('BUY' or 'SELL')
+        threshold: Minimum correlation strength (0.5 = moderate)
+    
+    Returns:
+        True if all correlated pairs align correctly
     """
-    for value in correlations.values():
-        if value < threshold:
-            return False
-    return True
+    # Convert BUY/SELL to UP/DOWN for correlation checking
+    trend_direction = 'UP' if direction == 'BUY' else 'DOWN'
+    
+    return validate_correlation_directions(
+        correlations=correlations,
+        direction=trend_direction,
+        threshold=threshold
+    )
 
 
 def ma_hit_confirmed(
@@ -122,7 +141,14 @@ def validate_tce(
         "position_size": None,
         "risk_amount": None,
         "pip_value_per_lot": None,
-        "failure_reason": None
+        "failure_reason": None,
+        # NEW: Order Placement Details
+        "order_type": None,  # "BUY_STOP" or "SELL_STOP"
+        "entry_price": None,  # Entry price 2-3 pips above/below confirmation candle
+        "pending_order": None,  # Full order specification dict
+        "order_placement_valid": False,  # Whether order placement is valid
+        "confirmation_candle_high": None,
+        "confirmation_candle_low": None
     }
 
     # 1️⃣ Trend
@@ -188,10 +214,25 @@ def validate_tce(
     result["ma_hit_ok"] = True
 
     # 6️⃣ Correlation
-    if not correlation_confirmed(correlations):
+    if not correlation_confirmed(correlations, direction):
         result["failure_reason"] = "Correlation not aligned"
         return result
     result["correlation_ok"] = True
+
+    # 6.5️⃣ Support/Resistance Filter - Entry must NOT be AT a S/R level
+    # Price bouncing between S/R = clean move (overbought recovery)
+    # Price bouncing AT S/R = might get stuck (rejection risk)
+    sr_analysis = get_sr_analysis(
+        candles=recent_candles,
+        entry_price=candle.close,
+        direction=direction,
+        lookback=50,
+        tolerance_pips=5
+    )
+    
+    if not sr_analysis["is_valid"]:
+        result["failure_reason"] = sr_analysis["failure_reason"]
+        return result
 
     # 7️⃣ Risk Management - Calculate Stop Loss & Take Profit
     # Stop Loss: 1.5 * ATR, minimum 12 pips, below 61.8% Fib
@@ -244,6 +285,50 @@ def validate_tce(
     result["position_size"] = position_size_info["lots"]
     result["risk_amount"] = position_size_info["risk_amount"]
     result["pip_value_per_lot"] = pip_value_per_lot
+
+    # 9️⃣ ORDER PLACEMENT - Create pending order 2-3 pips above/below confirmation candle
+    # Get the confirmation candle (should be the most recent candle)
+    confirmation_candle = recent_candles[-1] if recent_candles else candle
+    
+    # Calculate entry price 2-3 pips above/below confirmation candle
+    entry_price = calculate_entry_order_price(
+        confirmation_candle_high=confirmation_candle.high,
+        confirmation_candle_low=confirmation_candle.low,
+        direction=direction,
+        buffer_pips=2.5
+    )
+    
+    # Create pending order specification
+    pending_order = create_pending_order(
+        symbol=symbol,
+        direction=direction,
+        confirmation_candle_high=confirmation_candle.high,
+        confirmation_candle_low=confirmation_candle.low,
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        position_size=position_size_info["lots"],
+        buffer_pips=2.5
+    )
+    
+    # Validate order placement
+    order_validation = validate_order_placement(
+        pending_order,
+        confirmation_candle.high,
+        confirmation_candle.low
+    )
+    
+    if not order_validation["is_valid"]:
+        result["failure_reason"] = f"Order placement invalid: {', '.join(order_validation['issues'])}"
+        return result
+    
+    # Store order placement details in result
+    result["order_type"] = get_order_type(direction)  # "BUY_STOP" or "SELL_STOP"
+    result["entry_price"] = entry_price
+    result["pending_order"] = pending_order
+    result["order_placement_valid"] = True
+    result["confirmation_candle_high"] = confirmation_candle.high
+    result["confirmation_candle_low"] = confirmation_candle.low
 
     # ✅ VALID TCE
     result["is_valid"] = True

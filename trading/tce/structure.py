@@ -1,6 +1,6 @@
 from typing import List
 from .types import Indicators, MarketStructure, Candle
-from .utils import is_uptrend, is_downtrend
+from .utils import is_uptrend, is_downtrend, is_uptrend_with_structure, is_downtrend_with_structure
 
 
 def has_higher_highs(highs: List[float]) -> bool:
@@ -63,8 +63,18 @@ def is_valid_uptrend(
     indicators: Indicators,
     structure: MarketStructure
 ) -> bool:
-    # SIMPLIFIED: MA alignment + slopes enough for uptrend
-    # Structure check too strict for real markets with noise
+    """
+    Uptrend validation with swing structure.
+    ✅ UPTREND = MA alignment + positive slopes + HIGHER LOWS
+    
+    The second dip must be higher than the first dip, meaning price is
+    not going down as far on pullbacks = strengthening uptrend.
+    """
+    # Use structure-aware validation if lows are available
+    if structure.lows and len(structure.lows) >= 3:
+        return is_uptrend_with_structure(indicators, structure.lows)
+    
+    # Fallback to basic MA alignment + slopes if no structure
     return is_uptrend(indicators)
 
 
@@ -73,6 +83,16 @@ def is_valid_downtrend(
     indicators: Indicators,
     structure: MarketStructure
 ) -> bool:
-    # SIMPLIFIED: MA alignment + slopes enough for downtrend
-    # Structure check too strict for real markets with noise
+    """
+    Downtrend validation with swing structure.
+    ✅ DOWNTREND = MA alignment + negative slopes + LOWER HIGHS
+    
+    The second rally must be lower than the first rally, meaning price is
+    not going up as far on rebounds = strengthening downtrend.
+    """
+    # Use structure-aware validation if highs are available
+    if structure.highs and len(structure.highs) >= 3:
+        return is_downtrend_with_structure(indicators, structure.highs)
+    
+    # Fallback to basic MA alignment + slopes if no structure
     return is_downtrend(indicators)

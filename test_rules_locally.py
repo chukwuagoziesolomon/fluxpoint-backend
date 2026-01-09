@@ -40,11 +40,24 @@ if not csv_files:
     sys.exit(1)
 
 print("="*80)
-print("LOCAL TEST: VALIDATION RULES")
+print("LOCAL TEST: VALIDATION RULES ON ALL PAIRS")
 print("="*80 + "\n")
 
-# Test on first pair
-csv_file = csv_files[0]
+# Test on all pairs
+all_stats = {
+    'total_pairs': 0,
+    'pairs_with_setups': 0,
+    'total_setups': 0,
+    'total_checked': 0,
+    'rule_passes': {
+        'trend': 0,
+        'ma_level': 0,
+        'ma_retest': 0,
+        'candlestick': 0
+    }
+}
+
+for csv_file in sorted(csv_files):
 print(f"Testing with: {csv_file.name}\n")
 
 df = pd.read_csv(csv_file)
