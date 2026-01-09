@@ -53,10 +53,15 @@ print(f"📈 Timeframe: H1 (Hourly)\n")
 
 class TCEProbabilityModel(nn.Module):
     """Neural network to predict TCE setup validity"""
-    def __init__(self, input_size=20):
+    def __init__(self, input_size=45):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_size, 128),
+            nn.Linear(input_size, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            
+            nn.Linear(256, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
             nn.Dropout(0.3),
@@ -64,7 +69,7 @@ class TCEProbabilityModel(nn.Module):
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.2),
             
             nn.Linear(64, 32),
             nn.BatchNorm1d(32),
@@ -93,18 +98,21 @@ def calculate_slope(values, period=20):
     coeffs = np.polyfit(x, y, 1)
     return coeffs[0]
 
-def extract_features(row_idx, df, recent_candles_limit=50):
+def extract_features(row_idx, df, direction, result_dict, recent_candles_limit=50):
     """
-    Extract 20 features from a potential TCE setup.
+    Extract 45+ features from a TCE setup including:
+    - 20 Original features (MAs, slopes, ratios, volatility)
+    - 8 Rule scores (from calculate_all_rule_scores)
+    - Risk metrics (SL, TP, RR ratio)
+    
     These features will be used to train the neural network.
     """
     close = df['Close'].values
     high = df['High'].values
     low = df['Low'].values
     open_price = df['Open'].values
-    dates = df['Date'].values
     
-    if row_idx < 250:  # Need enough history
+    if row_idx < 250:
         return None
     
     # Get recent candles
@@ -112,26 +120,22 @@ def extract_features(row_idx, df, recent_candles_limit=50):
     recent_close = close[start_idx:row_idx+1]
     recent_high = high[start_idx:row_idx+1]
     recent_low = low[start_idx:row_idx+1]
-    recent_open = open_price[start_idx:row_idx+1]
     
-    # Calculate indicators for CURRENT CANDLE
+    # Calculate indicators
     close_window = close[row_idx-240:row_idx+1]
     high_window = high[row_idx-240:row_idx+1]
     low_window = low[row_idx-240:row_idx+1]
     
-    # CORRECT moving averages (NOT MA5/MA20!)
     ma6 = np.mean(close_window[-6:]) if len(close_window) >= 6 else 0
     ma18 = np.mean(close_window[-18:]) if len(close_window) >= 18 else 0
     ma50 = np.mean(close_window[-50:]) if len(close_window) >= 50 else 0
     ma200 = np.mean(close_window[-200:]) if len(close_window) >= 200 else 0
     
-    # Calculate slopes (rate of change)
     slope6 = calculate_slope(close_window, 6)
     slope18 = calculate_slope(close_window, 18)
     slope50 = calculate_slope(close_window, 50)
     slope200 = calculate_slope(close_window, 200)
     
-    # ATR (Average True Range)
     tr_list = []
     for i in range(1, min(15, len(high_window))):
         tr = max(
@@ -140,33 +144,78 @@ def extract_features(row_idx, df, recent_candles_limit=50):
             abs(low_window[i] - close_window[i-1])
         )
         tr_list.append(tr)
-    atr = np.mean(tr_list) if tr_list else 0
+    atr = np.mean(tr_list) if tr_list else 0.0001
     
-    # 20 Features:
-    # 1-4: Moving averages
-    # 5-8: MA slopes
-    # 9: ATR
-    # 10-13: MA ratios/relationships
-    # 14-17: Price position relative to MAs
-    # 18-20: Volatility metrics
-    
+    # ====== ORIGINAL 20 FEATURES ======
     features = [
         ma6, ma18, ma50, ma200,  # 1-4: MAs
         slope6, slope18, slope50, slope200,  # 5-8: Slopes
-        atr,  # 9: Volatility
+        atr,  # 9: ATR
         ma6/ma18 if ma18 > 0 else 1,  # 10: MA6/MA18 ratio
         ma18/ma50 if ma50 > 0 else 1,  # 11: MA18/MA50 ratio
         ma50/ma200 if ma200 > 0 else 1,  # 12: MA50/MA200 ratio
         close[row_idx]/ma6 if ma6 > 0 else 1,  # 13: Price/MA6 ratio
-        (close[row_idx] - ma6) / atr if atr > 0 else 0,  # 14: Distance from MA6 (in ATRs)
+        (close[row_idx] - ma6) / atr if atr > 0 else 0,  # 14: Distance from MA6
         (close[row_idx] - ma18) / atr if atr > 0 else 0,  # 15: Distance from MA18
         (close[row_idx] - ma50) / atr if atr > 0 else 0,  # 16: Distance from MA50
         (close[row_idx] - ma200) / atr if atr > 0 else 0,  # 17: Distance from MA200
-        np.std(recent_close[-20:]) if len(recent_close) >= 20 else 0,  # 18: Volatility (20 candles)
-        np.std(recent_close[-50:]) if len(recent_close) >= 50 else 0,  # 19: Volatility (50 candles)
-        (high_window[-1] - low_window[-1]) / close[row_idx] if close[row_idx] > 0 else 0,  # 20: Current candle range %
+        np.std(recent_close[-20:]) if len(recent_close) >= 20 else 0,  # 18: Volatility 20c
+        np.std(recent_close[-50:]) if len(recent_close) >= 50 else 0,  # 19: Volatility 50c
+        (high_window[-1] - low_window[-1]) / close[row_idx] if close[row_idx] > 0 else 0,  # 20: Candle range %
     ]
     
+    # ====== 8 RULE SCORES (from validation result) ======
+    if result_dict:
+        features.extend([
+            result_dict.get('rule1_trend', 0.5),          # 21: Rule 1 - Trend
+            result_dict.get('rule2_correlation', 0.5),    # 22: Rule 2 - Correlation
+            result_dict.get('rule3_multi_tf', 0.5),       # 23: Rule 3 - Multi-TF
+            result_dict.get('rule4_ma_retest', 0.5),      # 24: Rule 4 - MA Retest
+            result_dict.get('rule5_sr_filter', 0.5),      # 25: Rule 5 - S/R Filter
+            result_dict.get('rule6_risk_mgmt', 0.5),      # 26: Rule 6 - Risk Mgmt
+            result_dict.get('rule7_order_placement', 0.5),# 27: Rule 7 - Order Placement
+            result_dict.get('rule8_fibonacci', 0.5),      # 28: Rule 8 - Fibonacci
+        ])
+    else:
+        features.extend([0.5] * 8)  # Default if no validation result
+    
+    # ====== RISK METRICS ======
+    if result_dict:
+        features.extend([
+            result_dict.get('risk_reward_ratio', 1.5),    # 29: Risk:Reward
+            result_dict.get('sl_pips', 20.0),             # 30: Stop Loss pips
+            result_dict.get('tp_pips', 30.0),             # 31: Take Profit pips
+            result_dict.get('position_size', 0.1),        # 32: Position size
+        ])
+    else:
+        features.extend([1.5, 20.0, 30.0, 0.1])
+    
+    # ====== TREND & DIRECTION ENCODING ======
+    direction_encoding = 1.0 if direction == "BUY" else 0.0
+    uptrend_flag = float(is_valid_uptrend(Indicators(ma6=ma6, ma18=ma18, ma50=ma50, ma200=ma200,
+                                                       slope6=slope6, slope18=slope18, slope50=slope50, slope200=slope200, atr=atr),
+                                          MarketStructure(highs=list(recent_high), lows=list(recent_low))))
+    downtrend_flag = float(is_valid_downtrend(Indicators(ma6=ma6, ma18=ma18, ma50=ma50, ma200=ma200,
+                                                          slope6=slope6, slope18=slope18, slope50=slope50, slope200=slope200, atr=atr),
+                                             MarketStructure(highs=list(recent_high), lows=list(recent_low))))
+    
+    features.extend([
+        direction_encoding,                               # 33: Direction (1=BUY, 0=SELL)
+        uptrend_flag,                                     # 34: Is uptrend?
+        downtrend_flag,                                   # 35: Is downtrend?
+    ])
+    
+    # ====== MARKET CONDITIONS ======
+    threshold = np.percentile([a for a in tr_list], 75) if tr_list else 0.005
+    volatility_extreme = 1.0 if atr > threshold else 0.0
+    price_near_ma6 = 1.0 if abs(close[row_idx] - ma6) < atr else 0.0
+    
+    features.extend([
+        volatility_extreme,                               # 36: Is volatility high?
+        price_near_ma6,                                   # 37: Price near MA6?
+    ])
+    
+    # Total: 37+ features
     return features
 
 # ============================================================================
@@ -258,6 +307,15 @@ for pair_idx, (symbol, df) in enumerate(pair_data.items()):
             # Estimate Fibonacci level (how deep price went below MA)
             ma_ref = ma18  # Use MA18 as reference
             fib_level = 0.618  # Default to 61.8%
+            
+            # Calculate 61.8% Fibonacci price level for stop loss placement
+            recent_highs = high[max(0, row_idx-50):row_idx+1]
+            recent_lows = low[max(0, row_idx-50):row_idx+1]
+            swing_high = np.max(recent_highs) if len(recent_highs) > 0 else close[row_idx]
+            swing_low = np.min(recent_lows) if len(recent_lows) > 0 else close[row_idx]
+            fib_range = swing_high - swing_low
+            fib_618_price = swing_high - (fib_range * 0.618)  # 61.8% retracement from top
+            
             if candle.low < ma_ref and atr > 0:
                 depth = (ma_ref - candle.low) / atr
                 if depth < 0.5:  # Shallow - probably 38.2%
@@ -269,7 +327,8 @@ for pair_idx, (symbol, df) in enumerate(pair_data.items()):
             swing = Swing(
                 type='high' if close[row_idx] > np.mean(close[row_idx-50:row_idx]) else 'low',
                 price=float(close[row_idx]),
-                fib_level=fib_level
+                fib_level=fib_level,
+                fib_618_price=float(fib_618_price)
             )
             
             # Build recent candles
@@ -328,8 +387,24 @@ for pair_idx, (symbol, df) in enumerate(pair_data.items()):
                 if result['correlation_ok']: rule_stats['correlation_passed'] += 1
                 if result['risk_management_ok']: rule_stats['risk_mgmt_passed'] += 1
                 
+                # Create rule score dictionary for this setup
+                rule_scores = {
+                    'rule1_trend': 1.0 if result['trend_ok'] else 0.0,
+                    'rule2_correlation': 1.0 if result['correlation_ok'] else 0.0,
+                    'rule3_multi_tf': 1.0 if result['multi_tf_ok'] else 0.0,
+                    'rule4_ma_retest': 1.0 if result['ma_retest_ok'] else 0.0,
+                    'rule5_sr_filter': 1.0,  # Passed validation = good
+                    'rule6_risk_mgmt': 1.0 if result['risk_management_ok'] else 0.0,
+                    'rule7_order_placement': 1.0,  # Part of validation
+                    'rule8_fibonacci': 1.0 if result['fib_ok'] else 0.0,
+                    'risk_reward_ratio': result.get('risk_reward_ratio', 1.5),
+                    'sl_pips': result.get('sl_pips', 20.0),
+                    'tp_pips': result.get('tp_pips', 30.0),
+                    'position_size': result.get('position_size', 0.1),
+                }
+                
                 # Extract features for this valid setup
-                features = extract_features(row_idx, df)
+                features = extract_features(row_idx, df, result['direction'], rule_scores)
                 if features:
                     X_list.append(features)
                     y_list.append(1.0)  # Valid setup = 1
@@ -364,29 +439,6 @@ for pair_idx, (symbol, df) in enumerate(pair_data.items()):
 
 print(f"\n{'='*80}")
 print(f"📊 SUMMARY: {len(valid_setups_detailed)} VALID TCE SETUPS FOUND\n")
-
-# Print debugging statistics
-print("🔍 DEBUGGING STATISTICS:")
-print(f"  Total setups checked: {rule_stats['total_checked']}")
-if rule_stats['total_checked'] > 0:
-    print(f"\n  Rule Pass Rates:")
-    print(f"    1️⃣  Trend: {rule_stats['trend_passed']}/{rule_stats['total_checked']} ({100*rule_stats['trend_passed']/rule_stats['total_checked']:.1f}%)")
-    print(f"    2️⃣  Fibonacci: {rule_stats['fib_passed']}/{rule_stats['total_checked']} ({100*rule_stats['fib_passed']/rule_stats['total_checked']:.1f}%)")
-    print(f"    2.5️⃣ Swing: {rule_stats['swing_passed']}/{rule_stats['total_checked']} ({100*rule_stats['swing_passed']/rule_stats['total_checked']:.1f}%)")
-    print(f"    3️⃣  MA Level: {rule_stats['ma_level_passed']}/{rule_stats['total_checked']} ({100*rule_stats['ma_level_passed']/rule_stats['total_checked']:.1f}%)")
-    print(f"    3.5️⃣ MA Retest: {rule_stats['ma_retest_passed']}/{rule_stats['total_checked']} ({100*rule_stats['ma_retest_passed']/rule_stats['total_checked']:.1f}%)")
-    print(f"    4️⃣  Candlestick: {rule_stats['candlestick_passed']}/{rule_stats['total_checked']} ({100*rule_stats['candlestick_passed']/rule_stats['total_checked']:.1f}%)")
-    print(f"    5️⃣  Multi-TF: {rule_stats['multi_tf_passed']}/{rule_stats['total_checked']} ({100*rule_stats['multi_tf_passed']/rule_stats['total_checked']:.1f}%)")
-    print(f"    6️⃣  Correlation: {rule_stats['correlation_passed']}/{rule_stats['total_checked']} ({100*rule_stats['correlation_passed']/rule_stats['total_checked']:.1f}%)")
-    print(f"    7️⃣  Risk Mgmt: {rule_stats['risk_mgmt_passed']}/{rule_stats['total_checked']} ({100*rule_stats['risk_mgmt_passed']/rule_stats['total_checked']:.1f}%)")
-    
-    print(f"\n  Top Failure Reasons:")
-    sorted_failures = sorted(rule_stats['failure_reasons'].items(), key=lambda x: x[1], reverse=True)
-    for reason, count in sorted_failures[:5]:
-        pct = 100 * count / rule_stats['total_checked']
-        print(f"    • {reason}: {count} times ({pct:.1f}%)")
-
-print(f"\n{'='*80}\n")
 
 # Enhanced setup tracking with full validation details
 valid_setups_detailed = []
@@ -447,6 +499,15 @@ for pair_idx, (symbol, df) in enumerate(pair_data.items()):
             
             ma_ref = ma18
             fib_level = 0.618
+            
+            # Calculate 61.8% Fibonacci price level for stop loss placement
+            recent_highs = high[max(0, row_idx-50):row_idx+1]
+            recent_lows = low[max(0, row_idx-50):row_idx+1]
+            swing_high = np.max(recent_highs) if len(recent_highs) > 0 else close[row_idx]
+            swing_low = np.min(recent_lows) if len(recent_lows) > 0 else close[row_idx]
+            fib_range = swing_high - swing_low
+            fib_618_price = swing_high - (fib_range * 0.618)  # 61.8% retracement from top
+            
             if candle.low < ma_ref and atr > 0:
                 depth = (ma_ref - candle.low) / atr
                 if depth < 0.5:
@@ -457,7 +518,8 @@ for pair_idx, (symbol, df) in enumerate(pair_data.items()):
             swing = Swing(
                 type='high' if close[row_idx] > np.mean(close[row_idx-50:row_idx]) else 'low',
                 price=float(close[row_idx]),
-                fib_level=fib_level
+                fib_level=fib_level,
+                fib_618_price=float(fib_618_price)
             )
             
             recent_close = close[max(0, row_idx-50):row_idx+1]
@@ -498,7 +560,23 @@ for pair_idx, (symbol, df) in enumerate(pair_data.items()):
             )
             
             if result["is_valid"]:
-                features = extract_features(row_idx, df)
+                # Create rule score dictionary
+                rule_scores = {
+                    'rule1_trend': 1.0 if result['trend_ok'] else 0.0,
+                    'rule2_correlation': 1.0 if result['correlation_ok'] else 0.0,
+                    'rule3_multi_tf': 1.0 if result['multi_tf_ok'] else 0.0,
+                    'rule4_ma_retest': 1.0 if result['ma_retest_ok'] else 0.0,
+                    'rule5_sr_filter': 1.0,
+                    'rule6_risk_mgmt': 1.0 if result['risk_management_ok'] else 0.0,
+                    'rule7_order_placement': 1.0,
+                    'rule8_fibonacci': 1.0 if result['fib_ok'] else 0.0,
+                    'risk_reward_ratio': result.get('risk_reward_ratio', 1.5),
+                    'sl_pips': result.get('sl_pips', 20.0),
+                    'tp_pips': result.get('tp_pips', 30.0),
+                    'position_size': result.get('position_size', 0.1),
+                }
+                
+                features = extract_features(row_idx, df, result['direction'], rule_scores)
                 if features:
                     X_list.append(features)
                     y_list.append(1.0)
@@ -601,7 +679,7 @@ else:
     model = TCEProbabilityModel(input_size=X.shape[1]).to(device)
     criterion = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=False)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5
     
     # Training loop
     epochs = 50
