@@ -4,19 +4,43 @@ from .utils import is_uptrend, is_downtrend
 
 
 def has_higher_highs(highs: List[float]) -> bool:
-    return all(highs[i] > highs[i - 1] for i in range(1, len(highs)))
+    """Check if most recent highs are progressively higher (trend structure)."""
+    if len(highs) < 3:
+        return False
+    # Check that at least 70% of recent moves have higher highs
+    recent = highs[-10:]  # Last 10 candles
+    higher_count = sum(1 for i in range(1, len(recent)) if recent[i] > recent[i - 1])
+    return higher_count >= len(recent) * 0.6  # At least 60% upward
 
 
 def has_higher_lows(lows: List[float]) -> bool:
-    return all(lows[i] > lows[i - 1] for i in range(1, len(lows)))
+    """Check if most recent lows are progressively higher (uptrend structure)."""
+    if len(lows) < 3:
+        return False
+    # Check that at least 70% of recent moves have higher lows
+    recent = lows[-10:]  # Last 10 candles
+    higher_count = sum(1 for i in range(1, len(recent)) if recent[i] > recent[i - 1])
+    return higher_count >= len(recent) * 0.6  # At least 60% upward
 
 
 def has_lower_highs(highs: List[float]) -> bool:
-    return all(highs[i] < highs[i - 1] for i in range(1, len(highs)))
+    """Check if most recent highs are progressively lower (downtrend structure)."""
+    if len(highs) < 3:
+        return False
+    # Check that at least 70% of recent moves have lower highs
+    recent = highs[-10:]  # Last 10 candles
+    lower_count = sum(1 for i in range(1, len(recent)) if recent[i] < recent[i - 1])
+    return lower_count >= len(recent) * 0.6  # At least 60% downward
 
 
 def has_lower_lows(lows: List[float]) -> bool:
-    return all(lows[i] < lows[i - 1] for i in range(1, len(lows)))
+    """Check if most recent lows are progressively lower (downtrend structure)."""
+    if len(lows) < 3:
+        return False
+    # Check that at least 70% of recent moves have lower lows
+    recent = lows[-10:]  # Last 10 candles
+    lower_count = sum(1 for i in range(1, len(recent)) if recent[i] < recent[i - 1])
+    return lower_count >= len(recent) * 0.6  # At least 60% downward
 
 
 def is_semi_circle_swing(highs: List[float], lows: List[float], min_swings: int = 2) -> bool:
