@@ -63,11 +63,9 @@ def is_valid_uptrend(
     indicators: Indicators,
     structure: MarketStructure
 ) -> bool:
-    return (
-        is_uptrend(indicators)
-        and has_higher_highs(structure.highs)
-        and has_higher_lows(structure.lows)
-    )
+    # SIMPLIFIED: MA alignment + slopes enough for uptrend
+    # Structure check too strict for real markets with noise
+    return is_uptrend(indicators)
 
 
 # 🔽 Downtrend
@@ -75,8 +73,6 @@ def is_valid_downtrend(
     indicators: Indicators,
     structure: MarketStructure
 ) -> bool:
-    return (
-        is_downtrend(indicators)
-        and has_lower_highs(structure.highs)
-        and has_lower_lows(structure.lows)
-    )
+    # SIMPLIFIED: MA alignment + slopes enough for downtrend
+    # Structure check too strict for real markets with noise
+    return is_downtrend(indicators)
