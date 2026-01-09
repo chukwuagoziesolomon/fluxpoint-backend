@@ -3,20 +3,18 @@ from .types import Indicators, Candle
 
 
 def is_uptrend(ind: Indicators) -> bool:
+    """Uptrend: MA alignment + at least 2 of 3 slopes positive (realistic)."""
     return (
         ind.ma6 > ind.ma18 > ind.ma50 > ind.ma200
-        and ind.slope6 > 0
-        and ind.slope18 > 0
-        and ind.slope50 > 0
+        and sum([ind.slope6 > 0, ind.slope18 > 0, ind.slope50 > 0]) >= 2  # At least 2/3 positive
     )
 
 
 def is_downtrend(ind: Indicators) -> bool:
+    """Downtrend: MA alignment + at least 2 of 3 slopes negative (realistic)."""
     return (
         ind.ma200 > ind.ma50 > ind.ma18 > ind.ma6
-        and ind.slope6 < 0
-        and ind.slope18 < 0
-        and ind.slope50 < 0
+        and sum([ind.slope6 < 0, ind.slope18 < 0, ind.slope50 < 0]) >= 2  # At least 2/3 negative
     )
 
 
