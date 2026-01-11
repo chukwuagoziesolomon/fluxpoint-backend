@@ -1,0 +1,90 @@
+# KEY CHANGES NEEDED FOR CELL 4:
+
+## 1. CORRECT INDICATORS (Your actual TCE uses):
+- MA6, MA18, MA50, MA200 (NOT MA9, MA20)
+- Slopes: slope6, slope18, slope50, slope200
+- ATR only (NO MACD, NO RSI, NO Stochastic, NO CCI, NO ADX)
+
+## 2. TCESetup dataclass should match your types.py:
+```python
+@dataclass
+class TCESetup:
+    symbol: str
+    timeframe: str
+    direction: str  # "long" or "short"
+    entry_price: float
+    stop_loss: float
+    take_profit_1: float
+    take_profit_2: float
+    take_profit_3: float
+    current_price: float
+    
+    # CORRECT TCE INDICATORS (6 total):
+    ma6: float
+    ma18: float
+    ma50: float
+    ma200: float
+    slope6: float
+    slope18: float
+    slope50: float
+    slope200: float
+    atr: float  # Only ATR for volatility
+    
+    # Additional context
+    candles_data: pd.DataFrame = None
+```
+
+## 3. Calculate ONLY the correct indicators:
+```python
+def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    
+    # Moving Averages (TCE uses 6, 18, 50, 200)
+    df['MA6'] = df['Close'].rolling(window=6).mean()
+    df['MA18'] = df['Close'].rolling(window=18).mean()
+    df['MA50'] = df['Close'].rolling(window=50).mean()
+    df['MA200'] = df['Close'].rolling(window=200).mean()
+    
+    # MA Slopes (rate of change)
+    df['Slope6'] = df['MA6'].diff(3)  # 3-period slope
+    df['Slope18'] = df['MA18'].diff(3)
+    df['Slope50'] = df['MA50'].diff(5)
+    df['Slope200'] = df['MA200'].diff(10)
+    
+    # ATR for volatility/stop loss
+    high_low = df['High'] - df['Low']
+    high_close = np.abs(df['High'] - df['Close'].shift())
+    low_close = np.abs(df['Low'] - df['Close'].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df['ATR'] = tr.rolling(window=14).mean()
+    
+    return df.dropna()
+```
+
+## 4. UPDATE extract_features() in CELL 5:
+Remove ALL indicators not in your TCE system:
+- Remove: EMA_9, EMA_20, EMA_50, SMA_200 → Use: MA6, MA18, MA50, MA200
+- Remove: RSI, MACD, Stochastic, ADX, CCI, Momentum, Bollinger Bands
+- Keep: ATR, MA slopes, price action features
+
+## 5. FEATURES SHOULD BE:
+```python
+# 8 TCE indicators
+indicators = np.array([
+    setup.ma6,
+    setup.ma18,
+    setup.ma50,
+    setup.ma200,
+    setup.slope6,
+    setup.slope18,
+    setup.slope50,
+    setup.slope200
+])
+
+# ATR
+atr_features = np.array([setup.atr])
+
+# Total: 8 + 1 + risk metrics + trend flags + direction = ~15-20 features
+```
+
+This will align with YOUR actual TCE strategy from validation.py!
