@@ -277,11 +277,11 @@ print("="*80 + "\n")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# CELL 4: LOAD REAL MT5 DATA & GENERATE TRAINING EXAMPLES
+# CELL 4: LOAD MT5 DATA & GENERATE STRICT TCE SETUPS WITH CONFLUENCE
 # ════════════════════════════════════════════════════════════════════════════════
-# ⏱️ Time: 5-10 minutes
-# 📊 Expected: ~50,000+ examples (valid + invalid)
-# 🎯 Uses REAL MT5 intraday data with both positive and negative examples
+# ⏱️ Time: 10-15 minutes
+# 📊 Expected: ~5,000-20,000 HIGH-QUALITY examples (quality over quantity)
+# 🎯 STRICT FILTERING: HTF confirmation + S/R + Fib + Confluence + Trend alignment
 # 🔧 NO DATA LEAKAGE: Only raw indicators as features
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -294,8 +294,59 @@ from typing import List, Tuple, Optional
 from enum import Enum
 
 print("="*80)
-print("📊 CELL 4: LOAD REAL MT5 DATA & GENERATE TRAINING EXAMPLES")
+print("📊 CELL 4: LOAD MT5 DATA & GENERATE STRICT TCE SETUPS")
 print("="*80 + "\n")
+print("🎯 STRICT TCE FILTERING ENABLED:")
+print("   ✓ Higher timeframe trend confirmation")
+print("   ✓ Support/Resistance level validation")
+print("   ✓ Fibonacci retracement level checking")
+print("   ✓ Confluence requirement (2+ factors)")
+print("   ✓ Only trade WITH the trend")
+print("   ✓ Quality over quantity")
+print("   ✓ MA calculation verification (check against your charts!)\n")
+
+# ════════════════════════════════════════════════════════════════════════════════
+# HELPER FUNCTION: Verify MA calculation for any symbol/timestamp
+# ════════════════════════════════════════════════════════════════════════════════
+
+def verify_ma_at_timestamp(symbol: str, timeframe: str, timestamp: str, mt5_data_path: Path) -> None:
+    \"\"\"
+    Verify MA calculation for a specific candle - use this to check against your charts!
+    
+    Example:
+        verify_ma_at_timestamp('EURUSD', 'H1', '2025-10-02 14:00:00', mt5_data_path)
+    \"\"\"
+    try:
+        # Load the data file
+        csv_file = mt5_data_path / timeframe / f\"{symbol}_{timeframe}.csv\"
+        if not csv_file.exists():
+            print(f\"❌ File not found: {csv_file}\")
+            return
+        
+        df = pd.read_csv(csv_file)
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df.sort_values('Date').set_index('Date')
+        
+        # Calculate MAs
+        df['MA6'] = df['Close'].rolling(window=6, min_periods=6).mean()
+        df['MA18'] = df['Close'].rolling(window=18, min_periods=18).mean()
+        
+        # Find the timestamp
+        target_time = pd.to_datetime(timestamp)
+        if target_time not in df.index:
+            print(f\"❌ Timestamp {timestamp} not found in data\")
+            print(f\"   Available range: {df.index.min()} to {df.index.max()}\")
+            return
+        
+        # Get the candle and surrounding data
+        idx = df.index.get_loc(target_time)
+        
+        print(f\"\\n{'='*80}\")
+        print(f\"📊 MA VERIFICATION: {symbol} {timeframe} at {timestamp}\")
+        print(f\"{'='*80}\\n\")
+        
+        # Show last 6 closes for MA6 verification
+        print(\"🔍 MA6 CALCULATION (last 6 closes):\")\n        last_6 = df.iloc[idx-5:idx+1]\n        for i, (ts, row) in enumerate(last_6.iterrows(), 1):\n            marker = \"👉\" if i == 6 else \"  \"\n            print(f\"{marker} [{ts}] Close: {row['Close']:.5f}\")\n        \n        manual_ma6 = last_6['Close'].mean()\n        system_ma6 = df.iloc[idx]['MA6']\n        \n        print(f\"\\n   Manual MA6 (avg of above 6):  {manual_ma6:.5f}\")\n        print(f\"   System MA6:                   {system_ma6:.5f}\")\n        print(f\"   Match: {'✅ CORRECT' if abs(manual_ma6 - system_ma6) < 0.00001 else '❌ MISMATCH!'}\\n\")\n        \n        # Show last 18 closes for MA18 verification\n        print(\"🔍 MA18 CALCULATION (last 18 closes, showing first 3 and last 3):\")\n        last_18 = df.iloc[idx-17:idx+1]\n        print(f\"   First 3: {', '.join([f'{c:.5f}' for c in last_18['Close'].iloc[:3].values])}\")\n        print(f\"   ...\")\n        print(f\"   Last 3:  {', '.join([f'{c:.5f}' for c in last_18['Close'].iloc[-3:].values])}\")\n        \n        manual_ma18 = last_18['Close'].mean()\n        system_ma18 = df.iloc[idx]['MA18']\n        \n        print(f\"\\n   Manual MA18 (avg of 18):      {manual_ma18:.5f}\")\n        print(f\"   System MA18:                  {system_ma18:.5f}\")\n        print(f\"   Match: {'✅ CORRECT' if abs(manual_ma18 - system_ma18) < 0.00001 else '❌ MISMATCH!'}\\n\")\n        \n        print(f\"{'='*80}\")\n        print(\"\\n✅ Copy these close prices and manually calculate the average.\")\n        print(\"   Then compare with the MA values on your chart at this timestamp.\")\n        print(\"   They should match exactly!\\n\")\n        \n    except Exception as e:\n        print(f\"❌ Error: {str(e)}\")
 
 # --------------------------------------------------------------------------------
 # TCE VALIDATION FRAMEWORK (from trading.tce.validation)
@@ -325,23 +376,13 @@ class ValidationResult:
 @dataclass
 class TCESetup:
     """TCE trading setup with all required fields - ACTUAL TCE INDICATORS ONLY"""
-    # Basic info
+    # Basic info (REQUIRED - no defaults)
     symbol: str
     timeframe: str
     direction: str  # "long" or "short"
     entry_price: float
     
-    # Price levels
-    stop_loss: float
-    take_profit_1: float
-    take_profit_2: float
-    take_profit_3: float
-    
-    # Market structure
-    current_price: float
-    trend: str  # "uptrend", "downtrend", "range"
-    
-    # ACTUAL TCE INDICATORS (9 features - matches validation.py)
+    # ACTUAL TCE INDICATORS (REQUIRED - 9 features - matches validation.py)
     ma6: float
     ma18: float
     ma50: float
@@ -351,6 +392,19 @@ class TCESetup:
     slope50: float  # MA50 slope
     slope200: float  # MA200 slope
     atr: float  # Average True Range (volatility)
+    
+    # OPTIONAL fields with defaults
+    timestamp: str = ""  # Date/time of the setup
+    
+    # Price levels
+    stop_loss: float = 0.0
+    take_profit_1: float = 0.0
+    take_profit_2: float = 0.0
+    take_profit_3: float = 0.0
+    
+    # Market structure
+    current_price: float = 0.0
+    trend: str = "range"  # "uptrend", "downtrend", "range"
     
     # Candlestick pattern features
     has_bullish_pattern: bool = False
@@ -602,21 +656,25 @@ class TCEValidator:
 # --------------------------------------------------------------------------------
 
 class MT5DataLoader:
-    """Load real MT5 data and generate both valid and invalid training examples"""
+    """Load real MT5 data and generate STRICT TCE setups with confluence"""
     
-    # Use real MT5 timeframes (M15, M30, H1, H4, D1 for comprehensive intraday coverage)
+    # Use real MT5 timeframes - ONLY trade lower timeframes with HTF confirmation
     TIMEFRAMES = {
-        'M15': {'sample_every': 10, 'label': '15-minute'},
-        'M30': {'sample_every': 8, 'label': '30-minute'},
-        'H1': {'sample_every': 5, 'label': '1-hour'},
-        'H4': {'sample_every': 3, 'label': '4-hour'},
-        'D1': {'sample_every': 1, 'label': 'Daily'}
+        'M15': {'sample_every': 20, 'label': '15-minute', 'htf': 'H1'},
+        'M30': {'sample_every': 15, 'label': '30-minute', 'htf': 'H1'},
+        'H1': {'sample_every': 10, 'label': '1-hour', 'htf': 'H4'},
+        'H4': {'sample_every': 5, 'label': '4-hour', 'htf': 'D1'},
+        'D1': {'sample_every': 1, 'label': 'Daily', 'htf': None}
     }
+    
+    # Fibonacci retracement levels (key areas for entries)
+    FIB_LEVELS = [0.382, 0.500, 0.618, 0.786]
     
     def __init__(self, mt5_data_dir: Path):
         self.mt5_data_dir = mt5_data_dir
         self.validator = TCEValidator()
         self.spread_pips = 2.0  # Average forex spread
+        self.htf_data = {}  # Store higher timeframe data for confirmation
     
     def backtest_setup(self, setup: TCESetup, future_data: pd.DataFrame) -> float:
         """Simulate trade outcome - returns 1.0 if profitable, 0.0 if loss"""
@@ -685,13 +743,15 @@ class MT5DataLoader:
                     if len(df) < 300:
                         continue
                     
+                    # Parse Date column as datetime and set as index
                     df['Date'] = pd.to_datetime(df['Date'])
-                    df = df.sort_values('Date').reset_index(drop=True)
+                    df = df.sort_values('Date')
+                    df = df.set_index('Date')  # Set Date as index for proper timestamp access
                     
                     key = f"{symbol}_{tf_key}"
                     data[key] = df
                     
-                    date_range = f"{df['Date'].min().date()} to {df['Date'].max().date()}"
+                    date_range = f"{df.index.min().date()} to {df.index.max().date()}"
                     print(f"   ✅ {key:<12} {len(df):>6} candles | {date_range}")
                     
                 except Exception as e:
@@ -709,6 +769,9 @@ class MT5DataLoader:
             
             if pd.isna(atr) or atr == 0:
                 return None
+            
+            # Get timestamp from row index
+            timestamp = str(row.name) if hasattr(row, 'name') else ""
             
             # Realistic failure modes
             failure_type = np.random.choice([
@@ -767,6 +830,7 @@ class MT5DataLoader:
                 timeframe=timeframe,
                 direction=direction,
                 entry_price=entry,
+                timestamp=timestamp,
                 stop_loss=stop_loss,
                 take_profit_1=take_profit_1,
                 take_profit_2=take_profit_2,
@@ -793,15 +857,51 @@ class MT5DataLoader:
         except Exception as e:
             return None
     
+    def verify_ma_calculation(self, df: pd.DataFrame, idx: int) -> dict:
+        """Verify MA calculation matches manual calculation - for debugging"""
+        if idx < 200:
+            return None
+        
+        # Get current candle
+        current_close = df.iloc[idx]['Close']
+        timestamp = df.index[idx]
+        
+        # Manual MA6 calculation (last 6 closes including current)
+        last_6_closes = df.iloc[idx-5:idx+1]['Close'].values
+        manual_ma6 = last_6_closes.mean()
+        pandas_ma6 = df.iloc[idx]['MA6']
+        
+        # Manual MA18 calculation
+        last_18_closes = df.iloc[idx-17:idx+1]['Close'].values
+        manual_ma18 = last_18_closes.mean()
+        pandas_ma18 = df.iloc[idx]['MA18']
+        
+        return {
+            'timestamp': timestamp,
+            'close': current_close,
+            'manual_ma6': manual_ma6,
+            'pandas_ma6': pandas_ma6,
+            'ma6_match': abs(manual_ma6 - pandas_ma6) < 0.00001,
+            'manual_ma18': manual_ma18,
+            'pandas_ma18': pandas_ma18,
+            'ma18_match': abs(manual_ma18 - pandas_ma18) < 0.00001,
+            'last_6_closes': last_6_closes,
+            'last_18_closes': last_18_closes
+        }
+    
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate ACTUAL TCE indicators only - matches validation.py"""
         df = df.copy()
         
+        # IMPORTANT: Pandas rolling() uses the CURRENT row and N-1 previous rows
+        # So MA6 at index i = mean of closes at [i-5, i-4, i-3, i-2, i-1, i]
+        # This matches how TradingView and MT5 calculate MAs
+        
         # TCE Moving Averages (6, 18, 50, 200 periods)
-        df['MA6'] = df['Close'].rolling(window=6).mean()
-        df['MA18'] = df['Close'].rolling(window=18).mean()
-        df['MA50'] = df['Close'].rolling(window=50).mean()
-        df['MA200'] = df['Close'].rolling(window=200).mean()
+        df['MA6'] = df['Close'].rolling(window=6, min_periods=6).mean()
+        df['MA18'] = df['Close'].rolling(window=18, min_periods=18).mean()
+        df['MA50'] = df['Close'].rolling(window=50, min_periods=50).mean()
+        df['MA200'] = df['Close'].rolling(window=200, min_periods=200).mean()
         
         # MA Slopes (rate of change - indicates trend strength)
         df['Slope6'] = df['MA6'].diff(3)  # 3-period slope
@@ -845,29 +945,202 @@ class MT5DataLoader:
         
         return df.dropna()
     
-    def detect_trend(self, df: pd.DataFrame, idx: int) -> str:
-        """Detect market trend using ACTUAL TCE MAs (MA6, MA18, MA50)"""
+    def find_support_resistance(self, df: pd.DataFrame, idx: int, lookback: int = 100) -> dict:
+        """Find nearby support and resistance levels"""
+        if idx < lookback:
+            return {'support': [], 'resistance': []}
+        
+        # Get historical data
+        hist = df.iloc[max(0, idx-lookback):idx]
+        
+        # Find swing highs (resistance)
+        highs = hist['High']
+        resistance_levels = []
+        for i in range(2, len(highs)-2):
+            if highs.iloc[i] > highs.iloc[i-1] and highs.iloc[i] > highs.iloc[i-2] and \
+               highs.iloc[i] > highs.iloc[i+1] and highs.iloc[i] > highs.iloc[i+2]:
+                resistance_levels.append(highs.iloc[i])
+        
+        # Find swing lows (support)
+        lows = hist['Low']
+        support_levels = []
+        for i in range(2, len(lows)-2):
+            if lows.iloc[i] < lows.iloc[i-1] and lows.iloc[i] < lows.iloc[i-2] and \
+               lows.iloc[i] < lows.iloc[i+1] and lows.iloc[i] < lows.iloc[i+2]:
+                support_levels.append(lows.iloc[i])
+        
+        return {
+            'support': sorted(support_levels)[-3:] if support_levels else [],  # Last 3 support levels
+            'resistance': sorted(resistance_levels)[-3:] if resistance_levels else []  # Last 3 resistance
+        }
+    
+    def find_fibonacci_level(self, df: pd.DataFrame, idx: int, price: float, direction: str) -> tuple:
+        """Check if price is near a Fibonacci retracement level"""
+        if idx < 100:
+            return False, 0.0
+        
+        # Find recent swing high and low (last 50-100 candles)
+        lookback = min(100, idx)
+        hist = df.iloc[idx-lookback:idx]
+        
+        swing_high = hist['High'].max()
+        swing_low = hist['Low'].min()
+        swing_range = swing_high - swing_low
+        
+        if swing_range == 0:
+            return False, 0.0
+        
+        # Check if price is near any Fib level
+        for fib_level in self.FIB_LEVELS:
+            if direction == 'long':
+                # For longs, check retracement from high to low
+                fib_price = swing_high - (swing_range * fib_level)
+            else:
+                # For shorts, check retracement from low to high
+                fib_price = swing_low + (swing_range * fib_level)
+            
+            # Check if price within 0.3% of Fib level
+            distance_pct = abs(price - fib_price) / price * 100
+            if distance_pct < 0.3:
+                return True, fib_level
+        
+        return False, 0.0
+    
+    def detect_trend(self, df: pd.DataFrame, idx: int, strict: bool = True) -> str:
+        """Detect market trend using ACTUAL TCE MAs - STRICT mode requires strong trend"""
         if idx < 50:
             return "range"
             
         ma6 = df.iloc[idx]['MA6']
         ma18 = df.iloc[idx]['MA18']
         ma50 = df.iloc[idx]['MA50']
+        ma200 = df.iloc[idx]['MA200']
         slope6 = df.iloc[idx]['Slope6']
         slope18 = df.iloc[idx]['Slope18']
+        slope50 = df.iloc[idx]['Slope50']
         
-        # TCE uptrend: MAs stacked properly AND slopes positive
-        if ma6 > ma18 > ma50 and slope6 > 0 and slope18 > 0:
-            return "uptrend"
-        # TCE downtrend: MAs stacked properly AND slopes negative
-        elif ma6 < ma18 < ma50 and slope6 < 0 and slope18 < 0:
-            return "downtrend"
+        if strict:
+            # STRICT: All MAs must be properly aligned AND all slopes must agree
+            if ma6 > ma18 > ma50 > ma200 and slope6 > 0 and slope18 > 0 and slope50 > 0:
+                return "uptrend"
+            elif ma6 < ma18 < ma50 < ma200 and slope6 < 0 and slope18 < 0 and slope50 < 0:
+                return "downtrend"
+            else:
+                return "range"
         else:
-            return "range"
+            # Original less strict detection
+            if ma6 > ma18 > ma50 and slope6 > 0 and slope18 > 0:
+                return "uptrend"
+            elif ma6 < ma18 < ma50 and slope6 < 0 and slope18 < 0:
+                return "downtrend"
+            else:
+                return "range"
+    
+    def check_htf_confirmation(self, symbol: str, timeframe: str, current_trend: str, current_time) -> bool:
+        """Check if higher timeframe confirms the current timeframe trend"""
+        htf = self.TIMEFRAMES[timeframe].get('htf')
+        if not htf:
+            return True  # D1 has no HTF, always approved
+        
+        # Get HTF data
+        htf_key = f"{symbol}_{htf}"
+        if htf_key not in self.htf_data:
+            return False  # No HTF data available
+        
+        htf_df = self.htf_data[htf_key]
+        
+        # Find corresponding HTF candle (closest time before current)
+        try:
+            # Get HTF candle at or before current time
+            htf_candles = htf_df[htf_df.index <= current_time]
+            if len(htf_candles) < 50:
+                return False
+            
+            # Check HTF trend
+            htf_idx = len(htf_candles) - 1
+            htf_trend = self.detect_trend(htf_candles.reset_index(drop=True), htf_idx, strict=True)
+            
+            # HTF must match current timeframe trend
+            return htf_trend == current_trend
+        except:
+            return False
+    
+    def validate_tce_confluence(self, setup: TCESetup, df: pd.DataFrame, idx: int, symbol: str) -> bool:
+        """STRICT TCE validation - must pass ALL confluence requirements"""
+        
+        # 1. TREND DIRECTION MATCH (MANDATORY)
+        if setup.direction == 'long' and setup.trend != 'uptrend':
+            return False
+        if setup.direction == 'short' and setup.trend != 'downtrend':
+            return False
+        
+        # 2. HIGHER TIMEFRAME CONFIRMATION (MANDATORY)
+        current_time = df.index[idx]
+        htf_confirmed = self.check_htf_confirmation(symbol, setup.timeframe, setup.trend, current_time)
+        if not htf_confirmed:
+            return False
+        
+        # 3. AT MOVING AVERAGE (MANDATORY) - price must be within 0.5% of MA6 or MA18
+        dist_ma6 = abs(setup.entry_price - setup.ma6) / setup.ma6 * 100
+        dist_ma18 = abs(setup.entry_price - setup.ma18) / setup.ma18 * 100
+        at_ma = min(dist_ma6, dist_ma18) < 0.5
+        if not at_ma:
+            return False
+        
+        # 4. CONFLUENCE CHECK - need at least 2 of these 3:
+        confluence_score = 0
+        
+        # A. Support/Resistance level nearby
+        sr_levels = self.find_support_resistance(df, idx)
+        atr = setup.atr
+        tolerance = atr * 0.5
+        
+        at_sr = False
+        if setup.direction == 'long':
+            # Check if near support
+            for support in sr_levels['support']:
+                if abs(setup.entry_price - support) < tolerance:
+                    at_sr = True
+                    break
+        else:
+            # Check if near resistance
+            for resistance in sr_levels['resistance']:
+                if abs(setup.entry_price - resistance) < tolerance:
+                    at_sr = True
+                    break
+        
+        if at_sr:
+            confluence_score += 1
+        
+        # B. Fibonacci retracement level
+        at_fib, fib_level = self.find_fibonacci_level(df, idx, setup.entry_price, setup.direction)
+        if at_fib:
+            confluence_score += 1
+        
+        # C. Strong candlestick pattern matching direction
+        if setup.direction == 'long' and setup.has_bullish_pattern and setup.pattern_strength > 0.6:
+            confluence_score += 1
+        elif setup.direction == 'short' and setup.has_bearish_pattern and setup.pattern_strength > 0.6:
+            confluence_score += 1
+        
+        # Need at least 2 confluence factors
+        if confluence_score < 2:
+            return False
+        
+        # 5. STRONG TREND (slopes must be significant)
+        if setup.direction == 'long':
+            if setup.slope6 <= 0 or setup.slope18 <= 0:
+                return False
+        else:
+            if setup.slope6 >= 0 or setup.slope18 >= 0:
+                return False
+        
+        # All checks passed - this is a valid TCE setup
+        return True
     
     def generate_setups_from_data(self, symbol: str, df: pd.DataFrame, 
                                   timeframe: str) -> Tuple[List[Tuple[TCESetup, float]], int, int]:
-        """Generate setups and label based on ACTUAL P&L, not validation rules"""
+        """Generate STRICT TCE setups with confluence - quality over quantity"""
         labeled_setups = []
         profitable_count = 0
         unprofitable_count = 0
@@ -875,7 +1148,7 @@ class MT5DataLoader:
         # Calculate indicators
         df = self.calculate_indicators(df)
         
-        # Sample based on timeframe
+        # Sample less frequently for quality
         sample_every = self.TIMEFRAMES[timeframe]['sample_every']
         
         # Leave last 100 candles for forward testing
@@ -891,38 +1164,33 @@ class MT5DataLoader:
             if len(future_data) < 10:
                 continue
             
-            # Detect trend
-            trend = self.detect_trend(df, i)
+            # Detect STRICT trend (all MAs aligned)
+            trend = self.detect_trend(df, i, strict=True)
             
-            # Generate setup (try both directions)
-            for direction in ['long', 'short']:
-                setup = self._create_setup(
-                    symbol, timeframe, direction, row, 
-                    historical_data, trend
-                )
+            # Only trade in strong trends
+            if trend == 'range':
+                continue
+            
+            # Only trade in direction of trend
+            direction = 'long' if trend == 'uptrend' else 'short'
+            
+            setup = self._create_setup(
+                symbol, timeframe, direction, row, 
+                historical_data, trend
+            )
+            
+            if setup:
+                # STRICT TCE VALIDATION - must pass confluence check
+                if not self.validate_tce_confluence(setup, df, i, symbol):
+                    continue  # Skip this setup - doesn't meet TCE standards
                 
-                if setup:
-                    # Backtest to get ACTUAL outcome
-                    outcome = self.backtest_setup(setup, future_data)
-                    
-                    if outcome >= 0:  # Only keep if we have clear result
-                        labeled_setups.append((setup, outcome))
-                        if outcome == 1.0:
-                            profitable_count += 1
-                        else:
-                            unprofitable_count += 1
-            
-            # Also generate some realistic negative examples
-            if np.random.random() < 0.3:  # 30% chance
-                neg_setup = self.generate_realistic_negative_setup(
-                    symbol, timeframe, row, historical_data, trend
-                )
-                if neg_setup:
-                    outcome = self.backtest_setup(neg_setup, future_data)
-                    if outcome >= 0:
-                        labeled_setups.append((neg_setup, outcome))
-                        if outcome == 1.0:
-                            profitable_count += 1
+                # Backtest to get ACTUAL outcome
+                outcome = self.backtest_setup(setup, future_data)
+                
+                if outcome >= 0:  # Only keep if we have clear result
+                    labeled_setups.append((setup, outcome))
+                    if outcome == 1.0:
+                        profitable_count += 1
                         else:
                             unprofitable_count += 1
         
@@ -939,6 +1207,9 @@ class MT5DataLoader:
             
             if pd.isna(atr) or atr == 0:
                 return None
+            
+            # Get timestamp from row index
+            timestamp = str(row.name) if hasattr(row, 'name') else ""
             
             # Calculate levels
             if direction == 'long':
@@ -963,6 +1234,7 @@ class MT5DataLoader:
                 timeframe=timeframe,
                 direction=direction,
                 entry_price=entry,
+                timestamp=timestamp,
                 stop_loss=stop_loss,
                 take_profit_1=take_profit_1,
                 take_profit_2=take_profit_2,
@@ -998,14 +1270,23 @@ class MT5DataLoader:
         # Load MT5 data
         all_mt5_data = self.load_mt5_data()
         
+        # Store HTF data for confirmation
+        print("📊 Preparing higher timeframe data for confirmation...\n")
+        for key in all_mt5_data.keys():
+            self.htf_data[key] = self.calculate_indicators(all_mt5_data[key].copy())
+        
         all_labeled_setups = []
         total_profitable = 0
         total_unprofitable = 0
         
         total_datasets = len(all_mt5_data)
         
-        print(f"📊 Processing {total_datasets} datasets\n")
-        print("   Labels based on ACTUAL P&L simulation (not validation rules)\n")
+        print(f"📊 Processing {total_datasets} datasets with STRICT TCE filtering\n")
+        print("   ✓ Higher timeframe trend confirmation\n")
+        print("   ✓ Support/Resistance levels\n")
+        print("   ✓ Fibonacci retracement levels\n")
+        print("   ✓ Confluence requirement (2+ factors)\n")
+        print("   ✓ Quality over quantity\n")
         
         for idx, (key, df) in enumerate(all_mt5_data.items(), 1):
             parts = key.split('_')
@@ -1038,11 +1319,14 @@ class MT5DataLoader:
         }
         
         print(f"\n{'='*80}")
-        print(f"📊 BACKTEST GENERATION COMPLETE:")
+        print(f"📊 STRICT TCE FILTERING COMPLETE:")
         print(f"   • Total examples: {stats['total']:,}")
         print(f"   • Profitable (1.0): {stats['profitable']:,} ({stats['win_rate']*100:.1f}%)")
         print(f"   • Losses (0.0): {stats['unprofitable']:,} ({(1-stats['win_rate'])*100:.1f}%)")
-        print(f"   • Labeling method: ACTUAL P&L (not validation rules)")
+        print(f"   • Quality standard: ALL TCE rules enforced")
+        print(f"   • HTF confirmation: Required")
+        print(f"   • Confluence factors: Minimum 2 of 3")
+        print(f"   • S/R + Fibonacci: Checked")
         print(f"   • Spread accounted: {self.spread_pips} pips")
         print(f"{'='*80}\n")
         
@@ -1071,9 +1355,10 @@ else:
 
 labeled_examples, generation_stats = loader.generate_all_examples()
 
-print(f"\n✅ Generated {generation_stats['total']:,} training examples!")
-print(f"   ✓ Real market data")
-print(f"   ✓ Both valid and invalid setups")
+print(f"\n✅ Generated {generation_stats['total']:,} STRICT TCE training examples!")
+print(f"   ✓ Real market data with HTF confirmation")
+print(f"   ✓ ALL TCE rules enforced (trend, S/R, Fib, confluence)")
+print(f"   ✓ Quality over quantity - fewer but better setups")
 print(f"   ✓ No data leakage\n")
 
 
@@ -1245,9 +1530,162 @@ if invalid_count > 0:
     X_data = np.nan_to_num(X_data, nan=0.0, posinf=1.0, neginf=-1.0)
     print("✅ Cleaned!")
 
+# ════════════════════════════════════════════════════════════════════════════════
+# DISPLAY SAMPLE SETUPS WITH TCE RULE VALIDATION
+# ════════════════════════════════════════════════════════════════════════════════
+print(f"\n{'='*80}")
+print("📊 SAMPLE TCE SETUPS WITH VALIDATION")
+print("="*80 + "\n")
+
+def analyze_tce_setup(setup: TCESetup, label: float, verification_data: dict = None) -> str:
+    """Analyze if setup follows actual TCE rules"""
+    
+    analysis = []
+    analysis.append(f"{'='*70}")
+    analysis.append(f"🔍 SETUP: {setup.symbol} {setup.timeframe} - {setup.direction.upper()}")
+    analysis.append(f"   📅 Date/Time: {setup.timestamp}")
+    analysis.append(f"   Entry: {setup.entry_price:.5f} | Stop: {setup.stop_loss:.5f} | TP1: {setup.take_profit_1:.5f}")
+    analysis.append(f"   Label: {'✅ PROFITABLE' if label == 1.0 else '❌ LOSS'}")
+    
+    # Add MA verification data if available
+    if verification_data:
+        analysis.append(f"\n   📊 MA VERIFICATION (check these on your chart):")
+        analysis.append(f"   Last 6 closes: {', '.join([f'{c:.5f}' for c in verification_data['last_6_closes'][-3:]])}...")
+        analysis.append(f"   Manual MA6: {verification_data['manual_ma6']:.5f}")
+        analysis.append(f"   System MA6: {verification_data['pandas_ma6']:.5f}")
+        analysis.append(f"   MA6 Match: {'✅' if verification_data['ma6_match'] else '❌ MISMATCH!'}")
+    
+    analysis.append(f"{'='*70}\n")
+    
+    # Rule #1: Trend Identification
+    analysis.append("📈 TCE RULE #1: TREND IDENTIFICATION")
+    analysis.append(f"   MA6:   {setup.ma6:.5f} (slope: {setup.slope6:+.6f})")
+    analysis.append(f"   MA18:  {setup.ma18:.5f} (slope: {setup.slope18:+.6f})")
+    analysis.append(f"   MA50:  {setup.ma50:.5f} (slope: {setup.slope50:+.6f})")
+    analysis.append(f"   MA200: {setup.ma200:.5f} (slope: {setup.slope200:+.6f})")
+    
+    if setup.ma6 > setup.ma18 > setup.ma50 > setup.ma200:
+        ma_trend = "UPTREND ✅"
+        trend_ok = setup.direction == 'long'
+    elif setup.ma6 < setup.ma18 < setup.ma50 < setup.ma200:
+        ma_trend = "DOWNTREND ✅"
+        trend_ok = setup.direction == 'short'
+    else:
+        ma_trend = "MIXED/CHOPPY ⚠️"
+        trend_ok = False
+    
+    analysis.append(f"   Status: {ma_trend}")
+    analysis.append(f"   Direction Match: {'✅ CORRECT' if trend_ok else '❌ WRONG - Trading against trend!'}\n")
+    
+    # Rule #3: At Moving Average
+    dist_ma6 = abs(setup.entry_price - setup.ma6) / setup.ma6 * 100
+    dist_ma18 = abs(setup.entry_price - setup.ma18) / setup.ma18 * 100
+    dist_ma50 = abs(setup.entry_price - setup.ma50) / setup.ma50 * 100
+    
+    analysis.append("📍 TCE RULE #3: AT MOVING AVERAGE")
+    analysis.append(f"   Distance from MA6:  {dist_ma6:.2f}%")
+    analysis.append(f"   Distance from MA18: {dist_ma18:.2f}%")
+    analysis.append(f"   Distance from MA50: {dist_ma50:.2f}%")
+    
+    closest_dist = min(dist_ma6, dist_ma18, dist_ma50)
+    at_ma_level = closest_dist < 0.5
+    analysis.append(f"   Closest MA: {closest_dist:.2f}% - {'✅ AT MA LEVEL' if at_ma_level else '❌ TOO FAR FROM MA'}\n")
+    
+    # Rule #4: Risk Management
+    stop_pips = abs(setup.entry_price - setup.stop_loss) * 10000
+    tp1_pips = abs(setup.take_profit_1 - setup.entry_price) * 10000
+    rr_ratio = tp1_pips / stop_pips if stop_pips > 0 else 0
+    atr_pips = setup.atr * 10000
+    
+    analysis.append("🎯 TCE RULE #4: RISK MANAGEMENT")
+    analysis.append(f"   ATR: {atr_pips:.1f} pips")
+    analysis.append(f"   Stop Loss: {stop_pips:.1f} pips ({abs(setup.entry_price - setup.stop_loss) / setup.atr:.2f} ATR)")
+    analysis.append(f"   TP1: {tp1_pips:.1f} pips ({abs(setup.take_profit_1 - setup.entry_price) / setup.atr:.2f} ATR)")
+    analysis.append(f"   Risk:Reward: 1:{rr_ratio:.2f}")
+    
+    stop_ok = 1.5 <= abs(setup.entry_price - setup.stop_loss) / setup.atr <= 2.5
+    tp_ok = 2.5 <= abs(setup.take_profit_1 - setup.entry_price) / setup.atr <= 4.0
+    rr_ok = rr_ratio >= 1.5
+    
+    analysis.append(f"   Stop Size: {'✅ GOOD (1.5-2.5 ATR)' if stop_ok else '⚠️ Not ideal'}")
+    analysis.append(f"   TP Size: {'✅ GOOD (2.5-4 ATR)' if tp_ok else '⚠️ Not ideal'}")
+    analysis.append(f"   RR Ratio: {'✅ GOOD (>1.5)' if rr_ok else '❌ TOO LOW'}\n")
+    
+    # Rule #6: Candlestick Confirmation
+    analysis.append("🕯️ TCE RULE #6: CANDLESTICK CONFIRMATION")
+    
+    if setup.has_bullish_pattern:
+        pattern = "Hammer/Bullish Engulfing 📈"
+        pattern_ok = setup.direction == 'long'
+    elif setup.has_bearish_pattern:
+        pattern = "Shooting Star/Bearish Engulfing 📉"
+        pattern_ok = setup.direction == 'short'
+    else:
+        pattern = "No pattern detected"
+        pattern_ok = False
+    
+    analysis.append(f"   Pattern: {pattern}")
+    analysis.append(f"   Strength: {setup.pattern_strength:.2f}")
+    analysis.append(f"   Direction Match: {'✅ CORRECT' if pattern_ok else '⚠️ No pattern or mismatch'}\n")
+    
+    # Overall TCE Compliance
+    rules_passed = sum([trend_ok, at_ma_level, stop_ok and tp_ok and rr_ok, pattern_ok])
+    total_rules = 4
+    
+    analysis.append("🎯 TCE COMPLIANCE SCORE")
+    analysis.append(f"   Rules Passed: {rules_passed}/{total_rules}")
+    
+    if rules_passed == 4:
+        compliance = "✅ EXCELLENT - All TCE rules satisfied!"
+    elif rules_passed == 3:
+        compliance = "✅ GOOD - Most TCE rules satisfied"
+    elif rules_passed == 2:
+        compliance = "⚠️ MODERATE - Some TCE rules violated"
+    else:
+        compliance = "❌ POOR - Multiple TCE violations"
+    
+    analysis.append(f"   Status: {compliance}\n")
+    
+    return "\n".join(analysis)
+
+# Show 5 profitable and 5 loss examples with MA verification
+print("Showing 5 PROFITABLE setups (with MA verification):\n")
+profitable_indices = [i for i, label in enumerate(y_data) if label == 1.0][:5]
+for idx in profitable_indices:
+    setup, label = labeled_examples[idx]
+    # Get verification data if candles_data is available
+    verification = None
+    if setup.candles_data is not None and len(setup.candles_data) >= 200:
+        try:
+            # Find the setup in the historical data
+            setup_idx = len(setup.candles_data) - 1
+            verification = loader.verify_ma_calculation(setup.candles_data.reset_index(), setup_idx)
+        except:
+            pass
+    print(analyze_tce_setup(setup, label, verification))
+
+print("\n" + "="*80)
+print("Showing 5 LOSS setups (with MA verification):\n")
+loss_indices = [i for i, label in enumerate(y_data) if label == 0.0][:5]
+for idx in loss_indices:
+    setup, label = labeled_examples[idx]
+    # Get verification data if candles_data is available
+    verification = None
+    if setup.candles_data is not None and len(setup.candles_data) >= 200:
+        try:
+            setup_idx = len(setup.candles_data) - 1
+            verification = loader.verify_ma_calculation(setup.candles_data.reset_index(), setup_idx)
+        except:
+            pass
+    print(analyze_tce_setup(setup, label, verification))
+
 print(f"\n{'='*80}")
 print("✅ DATA PREPARATION COMPLETE")
 print("="*80 + "\n")
+
+print("💡 TIP: To verify MA calculations against your chart, run:")
+print("   verify_ma_at_timestamp('EURUSD', 'H1', '2025-10-02 14:00:00', mt5_data_path)")
+print("   Replace with actual symbol/timeframe/timestamp from setups above\n")
 
 
 # ════════════════════════════════════════════════════════════════════════════════

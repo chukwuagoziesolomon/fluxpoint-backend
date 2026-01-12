@@ -9,12 +9,14 @@ from .risk_management import (
     validate_risk_management,
     calculate_position_size,
     get_pip_value_per_lot
-)from .order_placement import (
+)
+from .order_placement import (
     calculate_entry_order_price,
     create_pending_order,
     validate_order_placement,
     get_order_type
-)from .correlation import validate_correlation_directions
+)
+from .correlation import validate_correlation_directions
 from .sr_detection import get_sr_analysis
 
 
