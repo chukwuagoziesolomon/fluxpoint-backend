@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from .types import Candle, Indicators
 
 
@@ -83,3 +83,77 @@ def has_ma_retest(
                         return True  # MA was tested before
     
     return False
+
+
+def detect_active_ma(
+    recent_candles: List[Candle],
+    indicators: Indicators,
+    direction: str,
+    timeframe: str = "M15",
+    consolidation_lookback: int = 7,
+    min_consolidation_ratio: float = 0.5,
+    penetration_factor: float = 0.1,
+    close_factor: float = 0.2,
+) -> Optional[str]:
+    """Detect which MA (18/50/200) is actually acting as support/resistance.
+
+    Logic:
+    - Ignore MA6 for swing classification (used only for trend elsewhere).
+    - Look at the last N candles for consolidation around each MA.
+    - On the most recent candle, require penetration + rejection at that MA.
+    - Return the first MA that satisfies both consolidation and bounce tests.
+    """
+
+    if not recent_candles:
+        return None
+
+    last = recent_candles[-1]
+
+    # Use ATR if available; otherwise fall back to small percentage of price
+    atr = getattr(indicators, "atr", None)
+    ref_price = last.close if last.close else last.open
+    if atr is None or atr <= 0:
+        atr = ref_price * 0.001  # ~0.1% of price
+
+    pen_tol = atr * penetration_factor
+    close_tol = atr * close_factor
+
+    ma_values = {
+        "MA18": indicators.ma18,
+        "MA50": indicators.ma50,
+        "MA200": indicators.ma200,
+    }
+
+    # Consolidation window: last N candles (or all if fewer)
+    if len(recent_candles) >= consolidation_lookback:
+        window = recent_candles[-consolidation_lookback:]
+    else:
+        window = recent_candles
+
+    required_hits = max(1, int(len(window) * min_consolidation_ratio))
+
+    for ma_name, ma_val in ma_values.items():
+        if ma_val is None:
+            continue
+
+        # 1) Consolidation around this MA
+        consolidation_hits = 0
+        for c in window:
+            mid = (c.high + c.low) / 2.0
+            if abs(mid - ma_val) <= close_tol:
+                consolidation_hits += 1
+
+        if consolidation_hits < required_hits:
+            continue
+
+        # 2) Penetration + rejection on the most recent candle
+        if direction == "BUY":
+            # Price dips below MA then closes back near/above it
+            if last.low <= ma_val - pen_tol and last.close >= ma_val - close_tol:
+                return ma_name
+        else:  # SELL
+            # Price spikes above MA then closes back near/below it
+            if last.high >= ma_val + pen_tol and last.close <= ma_val + close_tol:
+                return ma_name
+
+    return None

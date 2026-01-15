@@ -27,11 +27,18 @@ import time
 # CONFIGURATION
 # ================================================================================
 
-# Forex pairs to download
+# Forex pairs to download (28 major pairs)
 FOREX_PAIRS = [
+    # Major pairs (USD base or quote)
     'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD',
-    'NZDUSD', 'EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY',
-    'NZDJPY', 'EURCHF', 'GBPCHF', 'USDCHF', 'USDHKD'
+    'NZDUSD', 'USDCHF', 'USDHKD', 'USDSGD', 'USDZAR',
+    # Euro cross pairs
+    'EURGBP', 'EURJPY', 'EURAUD', 'EURCAD', 'EURNZD', 'EURCHF',
+    # GBP cross pairs
+    'GBPJPY', 'GBPAUD', 'GBPCAD', 'GBPNZD', 'GBPCHF',
+    # Other major crosses
+    'AUDJPY', 'AUDCAD', 'AUDNZD', 'AUDCHF',
+    'NZDJPY', 'CADJPY', 'CHFJPY'
 ]
 
 # Timeframes configuration
@@ -40,42 +47,42 @@ TIMEFRAMES = {
     'M1': {
         'mt5_code': mt5.TIMEFRAME_M1,
         'label': '1-minute',
-        'months_back': 2  # Most brokers: ~2 months of M1 data
+        'months_back': 1  # Conservative: 1 month (most brokers limit M1)
     },
     'M5': {
         'mt5_code': mt5.TIMEFRAME_M5,
         'label': '5-minute',
-        'months_back': 4  # ~4-6 months
+        'months_back': 8  # Extended to 8 months
     },
     'M15': {
         'mt5_code': mt5.TIMEFRAME_M15,
         'label': '15-minute',
-        'months_back': 6  # ~6-12 months
+        'months_back': 18  # Extended to 18 months
     },
     'M30': {
         'mt5_code': mt5.TIMEFRAME_M30,
         'label': '30-minute',
-        'months_back': 12  # ~1 year
+        'months_back': 24  # Extended to 24 months (2 years)
     },
     'H1': {
         'mt5_code': mt5.TIMEFRAME_H1,
         'label': '1-hour',
-        'start_year': 2020  # From 2020
+        'bars_back': 30000  # Conservative: ~3.4 years (720 bars/month * 47 months)
     },
     'H4': {
         'mt5_code': mt5.TIMEFRAME_H4,
         'label': '4-hour',
-        'start_year': 2020
+        'bars_back': 40000  # ~16 years of H4 data
     },
     'D1': {
         'mt5_code': mt5.TIMEFRAME_D1,
         'label': 'Daily',
-        'start_year': 2020
+        'bars_back': 10000  # ~27 years of daily data
     },
     'W1': {
         'mt5_code': mt5.TIMEFRAME_W1,
         'label': 'Weekly',
-        'start_year': 2020
+        'bars_back': 2000   # ~38 years of weekly data
     }
 }
 
@@ -219,22 +226,34 @@ def download_symbol_timeframe(symbol: str, timeframe_key: str,
         if not mt5.symbol_select(verified_symbol, True):
             return False, 0, {'error': 'Could not enable symbol'}
         
-        # Calculate start date based on timeframe
-        end_date = datetime.now()
+        # Calculate parameters based on timeframe configuration
         if 'months_back' in timeframe_config:
-            # Intraday timeframes: use months_back
+            # Intraday timeframes: calculate bar count from months
             months = timeframe_config['months_back']
-            start_date = end_date - timedelta(days=months * 30)
+            days = months * 30
+            
+            # Estimate bars based on timeframe
+            if timeframe_key == 'M1':
+                bars_needed = days * 24 * 60      # 1440 bars/day
+            elif timeframe_key == 'M5':
+                bars_needed = days * 24 * 12      # 288 bars/day
+            elif timeframe_key == 'M15':
+                bars_needed = days * 24 * 4       # 96 bars/day
+            elif timeframe_key == 'M30':
+                bars_needed = days * 24 * 2       # 48 bars/day
+            else:
+                bars_needed = days * 24           # Default: 24 bars/day
         else:
-            # Higher timeframes: use start_year
-            start_date = datetime(timeframe_config['start_year'], 1, 1)
+            # Higher timeframes: use bars_back directly
+            bars_needed = timeframe_config['bars_back']
         
-        # Get data from MT5 using date range
-        rates = mt5.copy_rates_range(
+        # Use copy_rates_from_pos (most reliable - counts from current bar backwards)
+        # Position 0 = current bar, position 1 = previous bar, etc.
+        rates = mt5.copy_rates_from_pos(
             verified_symbol,
             timeframe_config['mt5_code'],
-            start_date,
-            end_date
+            0,  # Start from current bar
+            bars_needed  # Number of bars to retrieve
         )
         
         # Check if data was returned

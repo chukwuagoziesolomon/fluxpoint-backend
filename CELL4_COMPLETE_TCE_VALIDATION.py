@@ -366,11 +366,18 @@ for pair_idx, (symbol, df) in enumerate(pair_data.items()):
             ma_ref = ma18  # Use MA18 as reference
             fib_level = 0.618  # Default to 61.8%
             
-            # Calculate 61.8% Fibonacci price level for stop loss placement
-            recent_highs = high[max(0, row_idx-50):row_idx+1]
-            recent_lows = low[max(0, row_idx-50):row_idx+1]
-            swing_high = np.max(recent_highs) if len(recent_highs) > 0 else close[row_idx]
-            swing_low = np.min(recent_lows) if len(recent_lows) > 0 else close[row_idx]
+            # ✅ PROPER SWING DETECTION with lookback validation
+            # Find actual swing highs/lows (peaks and valleys)
+            recent_prices = close[max(0, row_idx-100):row_idx+1]
+            recent_highs = high[max(0, row_idx-100):row_idx+1]
+            recent_lows = low[max(0, row_idx-100):row_idx+1]
+            
+            # Find swing points using proper lookback logic
+            swing_low, swing_high, swing_low_idx, swing_high_idx = find_most_recent_swing(
+                recent_prices, recent_highs, recent_lows, row_idx, lookback=5
+            )
+            
+            # Calculate Fibonacci levels from the swing
             fib_range = swing_high - swing_low
             fib_618_price = swing_high - (fib_range * 0.618)  # 61.8% retracement from top
             
@@ -382,9 +389,15 @@ for pair_idx, (symbol, df) in enumerate(pair_data.items()):
                     fib_level = 0.5
                 # else: 61.8% or deeper
             
+            # Determine swing type based on trend direction
+            # For UPTREND: swing_low is the reference point (valley)
+            # For DOWNTREND: swing_high is the reference point (peak)
+            is_uptrend_ma = ma6 > ma18 and ma18 > ma50
+            is_downtrend_ma = ma50 > ma18 and ma18 > ma6
+            
             swing = Swing(
-                type='high' if close[row_idx] > np.mean(close[row_idx-50:row_idx]) else 'low',
-                price=float(close[row_idx]),
+                type='low' if is_uptrend_ma else 'high',  # 'low' = uptrend (from valley), 'high' = downtrend (from peak)
+                price=float(swing_low if is_uptrend_ma else swing_high),
                 fib_level=fib_level,
                 fib_618_price=float(fib_618_price)
             )

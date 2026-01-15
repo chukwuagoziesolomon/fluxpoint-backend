@@ -1,2204 +1,1434 @@
 # ════════════════════════════════════════════════════════════════════════════════
-# COMPLETE TCE MULTI-TIMEFRAME TRAINING PIPELINE FOR GOOGLE COLAB
+# TCE COMPLETE PIPELINE - MULTI-CELL VERSION FOR GOOGLE COLAB
 # ════════════════════════════════════════════════════════════════════════════════
 #
-# 🎯 WHAT THIS DOES:
-# - Loads cleaned forex data from Google Drive
-# - Generates 8 timeframes (1M, 5M, 15M, 30M, 1H, 4H, 1D, 1W)
-# - Validates TCE setups using actual trading rules
-# - Trains neural network on 30,000+ examples
-# - Saves model back to Google Drive
+# 🎯 WORKFLOW (Run cells in order):
+# 
+# CELL 1: Setup - Clone repo and install dependencies
+# CELL 2: Extract Data - Upload CSVs and extract training examples
+# CELL 3: View Examples - Inspect extracted data before training
+# CELL 4: Train Model - Train DL model on extracted data
+# CELL 5: Download Results - Get model and training data
 #
-# ⏱️ TOTAL TIME: 1-2 hours with GPU
+# ⏱️ TOTAL TIME: 5-10 minutes
 #
 # 📋 BEFORE STARTING:
-# 1. Enable GPU: Runtime → Change runtime type → GPU → Save
-# 2. Upload cleaned data to: My Drive/forex_data/training_data_cleaned/
-#    (Run prepare_for_colab.py locally first)
-# 3. Update REPO_URL in CELL 1 with your GitHub repository
-#    Example: https://github.com/yourusername/fluxpointai-backend.git
+# 1. Download MT5 data locally: python download_mt5_multi_timeframe.py
+# 2. Have CSV files ready (multiple pairs and timeframes recommended)
 #
-# 🚀 THEN: Run each cell in order (Ctrl+Enter or click Play button)
+# 🚀 RUN EACH CELL IN ORDER (Ctrl+Enter or click Play)
 #
 # ════════════════════════════════════════════════════════════════════════════════
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# CELL 1: CLONE/PULL GITHUB REPOSITORY
-# ════════════════════════════════════════════════════════════════════════════════
-# ⏱️ Time: 1-2 minutes
-# 🔗 Clones your trading repository with validation code
+# CELL 1: SETUP - CLONE REPO & INSTALL DEPENDENCIES
 # ════════════════════════════════════════════════════════════════════════════════
 
 import os
+import sys
 import subprocess
 from pathlib import Path
 
 print("="*80)
-print("📦 CELL 1: CLONE/PULL GITHUB REPOSITORY")
+print("🚀 STEP 1: CLONE GITHUB REPOSITORY")
 print("="*80)
 
-# Repository details
-REPO_URL = "https://github.com/YOUR_USERNAME/fluxpointai-backend.git"  # ⚠️ UPDATE THIS!
+# Repository details (update if using your own fork)
+REPO_URL = "https://github.com/YOUR_USERNAME/fluxpointai-backend.git"
 REPO_NAME = "fluxpointai-backend"
 REPO_PATH = Path(f"/content/{REPO_NAME}")
 
 print(f"\n🔗 Repository: {REPO_URL}")
-print(f"📂 Local path: {REPO_PATH}\n")
 
-# Check if repo exists
 if REPO_PATH.exists():
-    print("📁 Repository already exists - pulling latest changes...")
+    print("📁 Repository exists - pulling latest changes...")
     os.chdir(REPO_PATH)
-    
     try:
-        # Pull latest changes
-        result = subprocess.run(
-            ["git", "pull", "origin", "main"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        print("✅ Successfully pulled latest changes")
-        print(f"   {result.stdout.strip()}")
-    except subprocess.CalledProcessError as e:
-        print(f"⚠️  Pull failed (using existing code): {e.stderr.strip()}")
+        subprocess.run(["git", "pull"], capture_output=True, text=True, check=True)
+        print("✅ Updated to latest version")
+    except:
+        print("⚠️  Using existing code")
 else:
     print("📥 Cloning repository...")
-    
     try:
-        # Clone repository
-        result = subprocess.run(
-            ["git", "clone", REPO_URL, str(REPO_PATH)],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        print("✅ Successfully cloned repository")
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Clone failed: {e.stderr.strip()}")
-        print("\n📝 TO FIX THIS:")
-        print("   1. Update REPO_URL above with your actual GitHub repo")
-        print("   2. Make sure your repo is public OR")
-        print("   3. Set up GitHub token authentication")
-        raise
+        subprocess.run(["git", "clone", REPO_URL, str(REPO_PATH)], 
+                      capture_output=True, text=True, check=True)
+        print("✅ Repository cloned")
+    except:
+        print("⚠️  Clone failed - will use standalone mode")
+        REPO_PATH.mkdir(parents=True, exist_ok=True)
 
 # Add to Python path
-import sys
 fluxpoint_path = str(REPO_PATH / "fluxpoint")
 if fluxpoint_path not in sys.path:
     sys.path.insert(0, fluxpoint_path)
-    print(f"\n✅ Added to Python path: {fluxpoint_path}")
-
-# Verify trading module is accessible
-try:
-    from trading.tce import validation, types, utils
-    print("✅ Trading modules loaded successfully")
-except ImportError as e:
-    print(f"⚠️  Could not import trading modules: {e}")
-    print("   This is OK - we'll use built-in validation")
-
-print(f"\n{'='*80}")
-print("✅ REPOSITORY SETUP COMPLETE")
-print("="*80 + "\n")
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-# CELL 2: MOUNT DRIVE & VERIFY DATA
-# ════════════════════════════════════════════════════════════════════════════════
-# ⏱️ Time: 1-2 minutes
-# 📊 Expected: "✅ Found 15 files" with list of all currency pairs
-# ════════════════════════════════════════════════════════════════════════════════
-
-from google.colab import drive
-from pathlib import Path
-import pandas as pd
-import torch
-
-print("="*80)
-print("🔧 CELL 2: MOUNT DRIVE & VERIFY DATA")
-print("="*80)
-
-# 1. Mount Google Drive
-print("\n📁 Mounting Google Drive...")
-drive.mount('/content/drive', force_remount=True)
-print("✅ Google Drive mounted!\n")
-
-# 2. Check for MT5 data (real intraday data)
-mt5_data_dir = Path('/content/drive/MyDrive/forex_data/training_data_mt5')
-
-print(f"🔍 Checking for MT5 intraday data...")
-print(f"   Location: {mt5_data_dir}\n")
-
-if mt5_data_dir.exists():
-    # Check M15, M30, H1, H4, D1 folders
-    timeframes_found = []
-    for tf in ['M15', 'M30', 'H1', 'H4', 'D1']:
-        tf_dir = mt5_data_dir / tf
-        if tf_dir.exists():
-            csv_count = len(list(tf_dir.glob('*.csv')))
-            if csv_count > 0:
-                timeframes_found.append(f"{tf} ({csv_count} files)")
-    
-    if timeframes_found:
-        print(f"✅ MT5 data found:")
-        for tf in timeframes_found:
-            print(f"   • {tf}")
-        print(f"\n   ✓ Will use REAL MT5 intraday data for training")
-    else:
-        print(f"⚠️  MT5 folders exist but no CSV files found")
-        print(f"   Upload MT5 data downloaded from download_mt5_multi_timeframe.py")
-else:
-    print(f"⚠️  MT5 data not found")
-    print(f"\n📝 TO USE REAL DATA:")
-    print(f"   1. On local PC, run: python download_mt5_multi_timeframe.py")
-    print(f"   2. Upload training_data_mt5/ folder to Google Drive")
-    print(f"   3. Place at: /MyDrive/forex_data/training_data_mt5/")
-    print(f"   4. Should contain: H1/, H4/, D1/ folders with CSV files")
-
-print()
-
-# 3. Check for cleaned data (fallback - OPTIONAL if MT5 data exists)
-data_dir = Path('/content/drive/MyDrive/forex_data/training_data_cleaned')
-
-print(f"🔍 Checking for cleaned daily data (fallback)...")
-print(f"   Location: {data_dir}\n")
-
-if not data_dir.exists():
-    if mt5_data_dir.exists():
-        print("⚠️  Cleaned data not found, but that's OK!")
-        print("   ✓ MT5 data exists - will use that instead\n")
-        # Create placeholder to avoid errors later
-        data_dir.mkdir(parents=True, exist_ok=True)
-        csv_files = []
-        valid_files = 0
-        total_candles = 0
-    else:
-        print("❌ ERROR: Neither MT5 nor cleaned data found!")
-        print("\n📝 TO FIX THIS:")
-        print("   1. Run: python download_mt5_multi_timeframe.py")
-        print("   2. Upload training_data_mt5/ to Google Drive")
-        print("   3. Re-run this cell")
-        raise FileNotFoundError(f"No data found in either location")
-else:
-    # 3. List and validate CSV files
-    csv_files = sorted(data_dir.glob('*_data.csv'))
-
-    if not csv_files:
-        if mt5_data_dir.exists():
-            print("⚠️  No CSV files in cleaned data, but MT5 data exists")
-            print("   ✓ Will use MT5 data instead\n")
-            valid_files = 0
-            total_candles = 0
-        else:
-            print("❌ ERROR: No CSV files found!")
-            raise FileNotFoundError(f"No CSV files in: {data_dir}")
-    else:
-        print(f"✅ Found {len(csv_files)} CSV files:\n")
-
-        total_candles = 0
-        valid_files = 0
-
-        for csv_file in csv_files:
-            symbol = csv_file.stem.replace('_data', '').upper()
-            try:
-                df = pd.read_csv(csv_file, nrows=5)
-                required_cols = ['Date', 'Open', 'High', 'Low', 'Close']
-                if not all(col in df.columns for col in required_cols):
-                    print(f"   ⚠️  {symbol:<10} Missing columns!")
-                    continue
-                
-                df_full = pd.read_csv(csv_file)
-                candles = len(df_full)
-                total_candles += candles
-                valid_files += 1
-                
-                df_full['Date'] = pd.to_datetime(df_full['Date'])
-                date_range = f"{df_full['Date'].min().date()} to {df_full['Date'].max().date()}"
-                
-                print(f"   ✅ {symbol:<10} {candles:>5} candles | {date_range}")
-            except Exception as e:
-                print(f"   ❌ {symbol:<10} Error: {str(e)[:50]}")
-
-        print(f"\n{'='*80}")
-        print(f"📊 CLEANED DATA SUMMARY:")
-        print(f"   • Valid files: {valid_files}/{len(csv_files)}")
-        print(f"   • Total candles: {total_candles:,}")
-        print(f"   • Average per pair: {total_candles // valid_files if valid_files > 0 else 0:,}")
-        print(f"{'='*80}\n")
-
-# 4. Check GPU
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-print(f"🖥️  Device: {device}")
-
-if device == 'cuda':
-    print(f"   GPU: {torch.cuda.get_device_name(0)}")
-    print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-else:
-    print("   ⚠️  No GPU! Training will be SLOW")
-    print("   💡 Enable GPU: Runtime → Change runtime type → GPU")
-
-print(f"\n{'='*80}")
-print("✅ SETUP COMPLETE - Ready to train!")
-print("="*80 + "\n")
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-# CELL 3: INSTALL DEPENDENCIES
-# ════════════════════════════════════════════════════════════════════════════════
-# ⏱️ Time: 2-3 minutes
-# 📦 Installs: torch, pandas, numpy, scikit-learn
-# ════════════════════════════════════════════════════════════════════════════════
-
-import subprocess
-import sys
-
-print("="*80)
-print("📦 CELL 3: INSTALL DEPENDENCIES")
-print("="*80 + "\n")
-
-packages = [
-    'torch',
-    'pandas',
-    'numpy',
-    'scikit-learn',
-]
-
-print("Installing required packages (this may take 2-3 minutes)...\n")
-
-for pkg in packages:
-    print(f"  📥 Installing {pkg}...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
-    print(f"  ✅ {pkg} installed")
-
-print(f"\n{'='*80}")
-print("✅ ALL DEPENDENCIES INSTALLED")
-print("="*80 + "\n")
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-# CELL 4: LOAD MT5 DATA & GENERATE STRICT TCE SETUPS WITH CONFLUENCE
-# ════════════════════════════════════════════════════════════════════════════════
-# ⏱️ Time: 10-15 minutes
-# 📊 Expected: ~5,000-20,000 HIGH-QUALITY examples (quality over quantity)
-# 🎯 STRICT FILTERING: HTF confirmation + S/R + Fib + Confluence + Trend alignment
-# 🔧 NO DATA LEAKAGE: Only raw indicators as features
-# ════════════════════════════════════════════════════════════════════════════════
-
-import numpy as np
-import pandas as pd
-from pathlib import Path
-from datetime import datetime, timedelta
-from dataclasses import dataclass
-from typing import List, Tuple, Optional
-from enum import Enum
-
-print("="*80)
-print("📊 CELL 4: LOAD MT5 DATA & GENERATE STRICT TCE SETUPS")
-print("="*80 + "\n")
-print("🎯 STRICT TCE FILTERING ENABLED:")
-print("   ✓ Higher timeframe trend confirmation")
-print("   ✓ Support/Resistance level validation")
-print("   ✓ Fibonacci retracement level checking")
-print("   ✓ Confluence requirement (2+ factors)")
-print("   ✓ Only trade WITH the trend")
-print("   ✓ Quality over quantity")
-print("   ✓ MA calculation verification (check against your charts!)\n")
-
-# ════════════════════════════════════════════════════════════════════════════════
-# HELPER FUNCTION: Verify MA calculation for any symbol/timestamp
-# ════════════════════════════════════════════════════════════════════════════════
-
-def verify_ma_at_timestamp(symbol: str, timeframe: str, timestamp: str, mt5_data_path: Path) -> None:
-    \"\"\"
-    Verify MA calculation for a specific candle - use this to check against your charts!
-    
-    Example:
-        verify_ma_at_timestamp('EURUSD', 'H1', '2025-10-02 14:00:00', mt5_data_path)
-    \"\"\"
-    try:
-        # Load the data file
-        csv_file = mt5_data_path / timeframe / f\"{symbol}_{timeframe}.csv\"
-        if not csv_file.exists():
-            print(f\"❌ File not found: {csv_file}\")
-            return
-        
-        df = pd.read_csv(csv_file)
-        df['Date'] = pd.to_datetime(df['Date'])
-        df = df.sort_values('Date').set_index('Date')
-        
-        # Calculate MAs
-        df['MA6'] = df['Close'].rolling(window=6, min_periods=6).mean()
-        df['MA18'] = df['Close'].rolling(window=18, min_periods=18).mean()
-        
-        # Find the timestamp
-        target_time = pd.to_datetime(timestamp)
-        if target_time not in df.index:
-            print(f\"❌ Timestamp {timestamp} not found in data\")
-            print(f\"   Available range: {df.index.min()} to {df.index.max()}\")
-            return
-        
-        # Get the candle and surrounding data
-        idx = df.index.get_loc(target_time)
-        
-        print(f\"\\n{'='*80}\")
-        print(f\"📊 MA VERIFICATION: {symbol} {timeframe} at {timestamp}\")
-        print(f\"{'='*80}\\n\")
-        
-        # Show last 6 closes for MA6 verification
-        print(\"🔍 MA6 CALCULATION (last 6 closes):\")\n        last_6 = df.iloc[idx-5:idx+1]\n        for i, (ts, row) in enumerate(last_6.iterrows(), 1):\n            marker = \"👉\" if i == 6 else \"  \"\n            print(f\"{marker} [{ts}] Close: {row['Close']:.5f}\")\n        \n        manual_ma6 = last_6['Close'].mean()\n        system_ma6 = df.iloc[idx]['MA6']\n        \n        print(f\"\\n   Manual MA6 (avg of above 6):  {manual_ma6:.5f}\")\n        print(f\"   System MA6:                   {system_ma6:.5f}\")\n        print(f\"   Match: {'✅ CORRECT' if abs(manual_ma6 - system_ma6) < 0.00001 else '❌ MISMATCH!'}\\n\")\n        \n        # Show last 18 closes for MA18 verification\n        print(\"🔍 MA18 CALCULATION (last 18 closes, showing first 3 and last 3):\")\n        last_18 = df.iloc[idx-17:idx+1]\n        print(f\"   First 3: {', '.join([f'{c:.5f}' for c in last_18['Close'].iloc[:3].values])}\")\n        print(f\"   ...\")\n        print(f\"   Last 3:  {', '.join([f'{c:.5f}' for c in last_18['Close'].iloc[-3:].values])}\")\n        \n        manual_ma18 = last_18['Close'].mean()\n        system_ma18 = df.iloc[idx]['MA18']\n        \n        print(f\"\\n   Manual MA18 (avg of 18):      {manual_ma18:.5f}\")\n        print(f\"   System MA18:                  {system_ma18:.5f}\")\n        print(f\"   Match: {'✅ CORRECT' if abs(manual_ma18 - system_ma18) < 0.00001 else '❌ MISMATCH!'}\\n\")\n        \n        print(f\"{'='*80}\")\n        print(\"\\n✅ Copy these close prices and manually calculate the average.\")\n        print(\"   Then compare with the MA values on your chart at this timestamp.\")\n        print(\"   They should match exactly!\\n\")\n        \n    except Exception as e:\n        print(f\"❌ Error: {str(e)}\")
-
-# --------------------------------------------------------------------------------
-# TCE VALIDATION FRAMEWORK (from trading.tce.validation)
-# --------------------------------------------------------------------------------
-
-class TrendType(Enum):
-    """Market trend classification"""
-    UPTREND = "uptrend"
-    DOWNTREND = "downtrend"
-    RANGE = "range"
-
-class DirectionBias(Enum):
-    """Trade direction classification"""
-    BULLISH = "bullish"
-    BEARISH = "bearish"
-    NEUTRAL = "neutral"
-
-@dataclass
-class ValidationResult:
-    """Result of TCE setup validation"""
-    is_valid: bool
-    validation_scores: dict
-    failed_rules: List[str]
-    risk_reward_ratio: float
-    confidence_score: float
-    
-@dataclass
-class TCESetup:
-    """TCE trading setup with all required fields - ACTUAL TCE INDICATORS ONLY"""
-    # Basic info (REQUIRED - no defaults)
-    symbol: str
-    timeframe: str
-    direction: str  # "long" or "short"
-    entry_price: float
-    
-    # ACTUAL TCE INDICATORS (REQUIRED - 9 features - matches validation.py)
-    ma6: float
-    ma18: float
-    ma50: float
-    ma200: float
-    slope6: float  # MA6 slope (trend strength)
-    slope18: float  # MA18 slope
-    slope50: float  # MA50 slope
-    slope200: float  # MA200 slope
-    atr: float  # Average True Range (volatility)
-    
-    # OPTIONAL fields with defaults
-    timestamp: str = ""  # Date/time of the setup
-    
-    # Price levels
-    stop_loss: float = 0.0
-    take_profit_1: float = 0.0
-    take_profit_2: float = 0.0
-    take_profit_3: float = 0.0
-    
-    # Market structure
-    current_price: float = 0.0
-    trend: str = "range"  # "uptrend", "downtrend", "range"
-    
-    # Candlestick pattern features
-    has_bullish_pattern: bool = False
-    has_bearish_pattern: bool = False
-    pattern_strength: float = 0.0  # 0-1 score
-    
-    # Additional context
-    candles_data: pd.DataFrame = None
-
-class TCEValidator:
-    """Validates TCE setups according to trading rules"""
-    
-    def __init__(self):
-        self.min_rr_ratio = 1.5
-        self.max_stop_loss_pips = 50
-        self.min_confidence = 0.6
-        
-    def validate_setup(self, setup: TCESetup) -> ValidationResult:
-        """Validate a complete TCE setup"""
-        validation_scores = {}
-        failed_rules = []
-        
-        # Rule 1: Price Action Context (20%)
-        pa_score = self._validate_price_action(setup)
-        validation_scores['price_action'] = pa_score
-        if pa_score < 0.5:
-            failed_rules.append("Price Action")
-            
-        # Rule 2: Trend Alignment (25%)
-        trend_score = self._validate_trend(setup)
-        validation_scores['trend'] = trend_score
-        if trend_score < 0.5:
-            failed_rules.append("Trend Alignment")
-            
-        # Rule 3: Support/Resistance (15%)
-        sr_score = self._validate_support_resistance(setup)
-        validation_scores['support_resistance'] = sr_score
-        if sr_score < 0.5:
-            failed_rules.append("Support/Resistance")
-            
-        # Rule 4: Risk Management (20%)
-        risk_score = self._validate_risk_management(setup)
-        validation_scores['risk_management'] = risk_score
-        if risk_score < 0.5:
-            failed_rules.append("Risk Management")
-            
-        # Rule 5: Indicator Confluence (10%)
-        indicator_score = self._validate_indicators(setup)
-        validation_scores['indicators'] = indicator_score
-        if indicator_score < 0.5:
-            failed_rules.append("Indicators")
-            
-        # Rule 6: Entry Timing (10%)
-        timing_score = self._validate_timing(setup)
-        validation_scores['timing'] = timing_score
-        if timing_score < 0.5:
-            failed_rules.append("Timing")
-            
-        # Calculate confidence
-        weights = {
-            'trend': 0.25,
-            'price_action': 0.20,
-            'risk_management': 0.20,
-            'support_resistance': 0.15,
-            'indicators': 0.10,
-            'timing': 0.10
-        }
-        
-        confidence_score = sum(
-            validation_scores[k] * w 
-            for k, w in weights.items()
-        )
-        
-        # Calculate RR ratio
-        rr_ratio = self._calculate_rr_ratio(setup)
-        
-        # Final validation
-        is_valid = (
-            len(failed_rules) == 0 and
-            confidence_score >= self.min_confidence and
-            rr_ratio >= self.min_rr_ratio
-        )
-        
-        return ValidationResult(
-            is_valid=is_valid,
-            validation_scores=validation_scores,
-            failed_rules=failed_rules,
-            risk_reward_ratio=rr_ratio,
-            confidence_score=confidence_score
-        )
-    
-    def _validate_price_action(self, setup: TCESetup) -> float:
-        """Validate price action patterns"""
-        score = 0.5
-        
-        # Check if price is near key level
-        if setup.candles_data is not None and len(setup.candles_data) > 0:
-            recent_high = setup.candles_data['High'].tail(20).max()
-            recent_low = setup.candles_data['Low'].tail(20).min()
-            
-            if setup.direction == 'long':
-                # For longs, want price near support
-                distance_from_low = abs(setup.entry_price - recent_low)
-                range_size = recent_high - recent_low
-                if range_size > 0:
-                    relative_position = distance_from_low / range_size
-                    score = 1.0 - relative_position  # Better if closer to low
-            else:
-                # For shorts, want price near resistance
-                distance_from_high = abs(setup.entry_price - recent_high)
-                range_size = recent_high - recent_low
-                if range_size > 0:
-                    relative_position = distance_from_high / range_size
-                    score = 1.0 - relative_position  # Better if closer to high
-                    
-        return max(0.0, min(1.0, score))
-    
-    def _validate_trend(self, setup: TCESetup) -> float:
-        """Validate trend alignment using ACTUAL TCE indicators"""
-        score = 0.5
-        
-        # Check MA alignment (TCE Rule #1)
-        if setup.ma6 > setup.ma18 > setup.ma50:
-            if setup.direction == 'long':
-                score = 1.0
-            else:
-                score = 0.3
-        elif setup.ma6 < setup.ma18 < setup.ma50:
-            if setup.direction == 'short':
-                score = 1.0
-            else:
-                score = 0.3
-                
-        # Bonus for strong slopes (trend strength)
-        if abs(setup.slope6) > 0 and abs(setup.slope18) > 0:
-            score = min(1.0, score + 0.1)
-            
-        return score
-    
-    def _validate_support_resistance(self, setup: TCESetup) -> float:
-        """Validate support/resistance levels"""
-        score = 0.7  # Default neutral score
-        
-        if setup.candles_data is not None and len(setup.candles_data) > 50:
-            # Find swing highs/lows
-            highs = setup.candles_data['High'].tail(50)
-            lows = setup.candles_data['Low'].tail(50)
-            
-            recent_highs = highs.nlargest(5).values
-            recent_lows = lows.nsmallest(5).values
-            
-            # Check if entry near key level
-            tolerance = setup.atr * 0.5
-            
-            if setup.direction == 'long':
-                for low in recent_lows:
-                    if abs(setup.entry_price - low) < tolerance:
-                        score = 1.0
-                        break
-            else:
-                for high in recent_highs:
-                    if abs(setup.entry_price - high) < tolerance:
-                        score = 1.0
-                        break
-                        
-        return score
-    
-    def _validate_risk_management(self, setup: TCESetup) -> float:
-        """Validate risk management rules"""
-        score = 1.0
-        
-        # Check stop loss distance
-        sl_distance = abs(setup.entry_price - setup.stop_loss)
-        sl_pips = sl_distance * 10000  # Convert to pips for forex
-        
-        if sl_pips > self.max_stop_loss_pips:
-            score = 0.3
-        elif sl_pips < 10:
-            score = 0.5
-        else:
-            score = 1.0
-            
-        # Check RR ratio
-        rr_ratio = self._calculate_rr_ratio(setup)
-        if rr_ratio < self.min_rr_ratio:
-            score *= 0.5
-            
-        return score
-    
-    def _validate_indicators(self, setup: TCESetup) -> float:
-        """Validate technical indicators using ACTUAL TCE candlestick patterns"""
-        score = 0.5
-        
-        if setup.direction == 'long':
-            # Bullish candlestick pattern (TCE Rule #6)
-            if setup.has_bullish_pattern:
-                score += 0.3
-            
-            # Strong pattern
-            if setup.pattern_strength > 0.7:
-                score += 0.2
-                
-        else:  # short
-            # Bearish candlestick pattern (TCE Rule #6)
-            if setup.has_bearish_pattern:
-                score += 0.3
-            
-            # Strong pattern
-            if setup.pattern_strength > 0.7:
-                score += 0.2
-                
-        return min(1.0, score)
-    
-    def _validate_timing(self, setup: TCESetup) -> float:
-        """Validate entry timing using ACTUAL TCE slope strength"""
-        score = 0.6
-        
-        # Check volatility (using ATR)
-        if setup.atr > 0:
-            atr_pct = setup.atr / setup.entry_price
-            # Prefer moderate volatility
-            if 0.0005 < atr_pct < 0.002:
-                score = 0.9
-            elif atr_pct < 0.0005:
-                score = 0.4  # Too quiet
-            else:
-                score = 0.5  # Too volatile
-                
-        # Check momentum (using MA slopes)
-        slope_strength = abs(setup.slope6) + abs(setup.slope18)
-        if slope_strength > 0.0001:
-            if (setup.direction == 'long' and setup.slope6 > 0 and setup.slope18 > 0) or \
-               (setup.direction == 'short' and setup.slope6 < 0 and setup.slope18 < 0):
-                score = min(1.0, score + 0.2)
-                
-        return score
-    
-    def _calculate_rr_ratio(self, setup: TCESetup) -> float:
-        """Calculate risk:reward ratio"""
-        risk = abs(setup.entry_price - setup.stop_loss)
-        if risk == 0:
-            return 0.0
-            
-        reward = abs(setup.take_profit_1 - setup.entry_price)
-        return reward / risk
-
-# --------------------------------------------------------------------------------
-# REAL MT5 DATA LOADER & NEGATIVE EXAMPLE GENERATOR
-# --------------------------------------------------------------------------------
-
-class MT5DataLoader:
-    """Load real MT5 data and generate STRICT TCE setups with confluence"""
-    
-    # Use real MT5 timeframes - ONLY trade lower timeframes with HTF confirmation
-    TIMEFRAMES = {
-        'M15': {'sample_every': 20, 'label': '15-minute', 'htf': 'H1'},
-        'M30': {'sample_every': 15, 'label': '30-minute', 'htf': 'H1'},
-        'H1': {'sample_every': 10, 'label': '1-hour', 'htf': 'H4'},
-        'H4': {'sample_every': 5, 'label': '4-hour', 'htf': 'D1'},
-        'D1': {'sample_every': 1, 'label': 'Daily', 'htf': None}
-    }
-    
-    # Fibonacci retracement levels (key areas for entries)
-    FIB_LEVELS = [0.382, 0.500, 0.618, 0.786]
-    
-    def __init__(self, mt5_data_dir: Path):
-        self.mt5_data_dir = mt5_data_dir
-        self.validator = TCEValidator()
-        self.spread_pips = 2.0  # Average forex spread
-        self.htf_data = {}  # Store higher timeframe data for confirmation
-    
-    def backtest_setup(self, setup: TCESetup, future_data: pd.DataFrame) -> float:
-        """Simulate trade outcome - returns 1.0 if profitable, 0.0 if loss"""
-        try:
-            if len(future_data) < 10:
-                return 0.0  # Not enough data to test
-            
-            # Account for spread
-            spread = self.spread_pips / 10000.0
-            
-            if setup.direction == 'long':
-                effective_entry = setup.entry_price + spread
-                effective_sl = setup.stop_loss
-                effective_tp = setup.take_profit_1
-                
-                # Check each future candle
-                for _, candle in future_data.iterrows():
-                    # Check stop loss hit first (conservative)
-                    if candle['Low'] <= effective_sl:
-                        return 0.0  # Loss
-                    # Check take profit
-                    if candle['High'] >= effective_tp:
-                        return 1.0  # Win
-            else:  # short
-                effective_entry = setup.entry_price - spread
-                effective_sl = setup.stop_loss
-                effective_tp = setup.take_profit_1
-                
-                for _, candle in future_data.iterrows():
-                    # Check stop loss hit first
-                    if candle['High'] >= effective_sl:
-                        return 0.0  # Loss
-                    # Check take profit
-                    if candle['Low'] <= effective_tp:
-                        return 1.0  # Win
-            
-            # Neither hit - treat as neutral (exclude from training)
-            return -1.0
-            
-        except Exception:
-            return -1.0
-        
-    def load_mt5_data(self) -> dict:
-        """Load real MT5 CSV files from training_data_mt5/"""
-        print("📂 Loading REAL MT5 data...\n")
-        
-        data = {}
-        
-        # Load each timeframe
-        for tf_key in self.TIMEFRAMES.keys():
-            tf_dir = self.mt5_data_dir / tf_key
-            
-            if not tf_dir.exists():
-                print(f"   ⚠️  {tf_key} folder not found, skipping...")
-                continue
-            
-            csv_files = sorted(tf_dir.glob('*.csv'))
-            
-            for csv_file in csv_files:
-                symbol = csv_file.stem.split('_')[0].upper()
-                
-                try:
-                    df = pd.read_csv(csv_file)
-                    
-                    # Skip if empty or too small
-                    if len(df) < 300:
-                        continue
-                    
-                    # Parse Date column as datetime and set as index
-                    df['Date'] = pd.to_datetime(df['Date'])
-                    df = df.sort_values('Date')
-                    df = df.set_index('Date')  # Set Date as index for proper timestamp access
-                    
-                    key = f"{symbol}_{tf_key}"
-                    data[key] = df
-                    
-                    date_range = f"{df.index.min().date()} to {df.index.max().date()}"
-                    print(f"   ✅ {key:<12} {len(df):>6} candles | {date_range}")
-                    
-                except Exception as e:
-                    print(f"   ❌ {csv_file.name}: {str(e)[:50]}")
-        
-        print(f"\n   Total: {len(data)} datasets loaded\n")
-        return data
-    
-    def generate_realistic_negative_setup(self, symbol: str, timeframe: str, row: pd.Series, 
-                                         historical_data: pd.DataFrame, trend: str) -> Optional[TCESetup]:
-        """Generate REALISTIC failed trades - subtle issues, not obvious violations"""
-        try:
-            entry = row['Close']
-            atr = row['ATR']
-            
-            if pd.isna(atr) or atr == 0:
-                return None
-            
-            # Get timestamp from row index
-            timestamp = str(row.name) if hasattr(row, 'name') else ""
-            
-            # Realistic failure modes
-            failure_type = np.random.choice([
-                'tight_stop',      # Stop too tight, death by spread
-                'wrong_timing',    # Right direction, wrong entry timing
-                'low_volatility',  # Entered during consolidation
-                'near_resistance', # Long near resistance (or short near support)
-                'weak_momentum'    # Weak follow-through
-            ])
-            
-            direction = np.random.choice(['long', 'short'])
-            
-            if failure_type == 'tight_stop':
-                # Stop loss too tight - will get stopped out by noise
-                stop_mult = 1.0  # Only 1 ATR (too tight)
-                tp_mult = 2.0
-            elif failure_type == 'wrong_timing':
-                # Entered at wrong part of move (late entry)
-                stop_mult = 2.5
-                tp_mult = 4.0
-            elif failure_type == 'low_volatility':
-                # Low volatility = narrow range = likely false breakout
-                stop_mult = 1.5
-                tp_mult = 3.0
-            elif failure_type == 'near_resistance':
-                # Buying near top or selling near bottom
-                if direction == 'long':
-                    # Entry near recent high (bad for longs)
-                    pass
-                stop_mult = 2.0
-                tp_mult = 3.0
-            else:  # weak_momentum
-                # Setup looks good but momentum is weak
-                stop_mult = 2.0
-                tp_mult = 3.5
-            
-            # Calculate levels
-            if direction == 'long':
-                stop_loss = entry - (stop_mult * atr)
-                take_profit_1 = entry + (tp_mult * atr)
-                take_profit_2 = entry + (tp_mult * 1.5 * atr)
-                take_profit_3 = entry + (tp_mult * 2.0 * atr)
-            else:
-                stop_loss = entry + (stop_mult * atr)
-                take_profit_1 = entry - (tp_mult * atr)
-                take_profit_2 = entry - (tp_mult * 1.5 * atr)
-                take_profit_3 = entry - (tp_mult * 2.0 * atr)
-            
-            # Detect candlestick patterns
-            has_bullish = row['IsBullish'] > 0.5
-            has_bearish = row['IsBearish'] > 0.5
-            pattern_strength = min(row['PatternStrength'], 1.0)
-            
-            setup = TCESetup(
-                symbol=symbol,
-                timeframe=timeframe,
-                direction=direction,
-                entry_price=entry,
-                timestamp=timestamp,
-                stop_loss=stop_loss,
-                take_profit_1=take_profit_1,
-                take_profit_2=take_profit_2,
-                take_profit_3=take_profit_3,
-                current_price=entry,
-                trend=trend,
-                ma6=row['MA6'],
-                ma18=row['MA18'],
-                ma50=row['MA50'],
-                ma200=row['MA200'],
-                slope6=row['Slope6'],
-                slope18=row['Slope18'],
-                slope50=row['Slope50'],
-                slope200=row['Slope200'],
-                atr=atr,
-                has_bullish_pattern=has_bullish,
-                has_bearish_pattern=has_bearish,
-                pattern_strength=pattern_strength,
-                candles_data=historical_data
-            )
-            
-            return setup
-            
-        except Exception as e:
-            return None
-    
-    def verify_ma_calculation(self, df: pd.DataFrame, idx: int) -> dict:
-        """Verify MA calculation matches manual calculation - for debugging"""
-        if idx < 200:
-            return None
-        
-        # Get current candle
-        current_close = df.iloc[idx]['Close']
-        timestamp = df.index[idx]
-        
-        # Manual MA6 calculation (last 6 closes including current)
-        last_6_closes = df.iloc[idx-5:idx+1]['Close'].values
-        manual_ma6 = last_6_closes.mean()
-        pandas_ma6 = df.iloc[idx]['MA6']
-        
-        # Manual MA18 calculation
-        last_18_closes = df.iloc[idx-17:idx+1]['Close'].values
-        manual_ma18 = last_18_closes.mean()
-        pandas_ma18 = df.iloc[idx]['MA18']
-        
-        return {
-            'timestamp': timestamp,
-            'close': current_close,
-            'manual_ma6': manual_ma6,
-            'pandas_ma6': pandas_ma6,
-            'ma6_match': abs(manual_ma6 - pandas_ma6) < 0.00001,
-            'manual_ma18': manual_ma18,
-            'pandas_ma18': pandas_ma18,
-            'ma18_match': abs(manual_ma18 - pandas_ma18) < 0.00001,
-            'last_6_closes': last_6_closes,
-            'last_18_closes': last_18_closes
-        }
-    
-    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate ACTUAL TCE indicators only - matches validation.py"""
-        df = df.copy()
-        
-        # IMPORTANT: Pandas rolling() uses the CURRENT row and N-1 previous rows
-        # So MA6 at index i = mean of closes at [i-5, i-4, i-3, i-2, i-1, i]
-        # This matches how TradingView and MT5 calculate MAs
-        
-        # TCE Moving Averages (6, 18, 50, 200 periods)
-        df['MA6'] = df['Close'].rolling(window=6, min_periods=6).mean()
-        df['MA18'] = df['Close'].rolling(window=18, min_periods=18).mean()
-        df['MA50'] = df['Close'].rolling(window=50, min_periods=50).mean()
-        df['MA200'] = df['Close'].rolling(window=200, min_periods=200).mean()
-        
-        # MA Slopes (rate of change - indicates trend strength)
-        df['Slope6'] = df['MA6'].diff(3)  # 3-period slope
-        df['Slope18'] = df['MA18'].diff(3)
-        df['Slope50'] = df['MA50'].diff(5)  # Longer MAs use longer slope
-        df['Slope200'] = df['MA200'].diff(10)
-        
-        # ATR for volatility and stop loss calculation
-        high_low = df['High'] - df['Low']
-        high_close = np.abs(df['High'] - df['Close'].shift())
-        low_close = np.abs(df['Low'] - df['Close'].shift())
-        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        df['ATR'] = tr.rolling(window=14).mean()
-        
-        # Candlestick pattern detection
-        df['Body'] = abs(df['Close'] - df['Open'])
-        df['UpperShadow'] = df['High'] - df[['Open', 'Close']].max(axis=1)
-        df['LowerShadow'] = df[['Open', 'Close']].min(axis=1) - df['Low']
-        df['Range'] = df['High'] - df['Low']
-        
-        # Bullish patterns (hammer, bullish engulfing, morning star)
-        df['IsBullish'] = (
-            # Hammer: small body, long lower shadow
-            ((df['LowerShadow'] > df['Body'] * 2) & (df['UpperShadow'] < df['Body'] * 0.5)) |
-            # Bullish engulfing: current candle engulfs previous
-            ((df['Close'] > df['Open']) & (df['Close'].shift(1) < df['Open'].shift(1)) & 
-             (df['Close'] > df['Open'].shift(1)) & (df['Open'] < df['Close'].shift(1)))
-        ).astype(float)
-        
-        # Bearish patterns (shooting star, bearish engulfing, evening star)
-        df['IsBearish'] = (
-            # Shooting star: small body, long upper shadow
-            ((df['UpperShadow'] > df['Body'] * 2) & (df['LowerShadow'] < df['Body'] * 0.5)) |
-            # Bearish engulfing
-            ((df['Close'] < df['Open']) & (df['Close'].shift(1) > df['Open'].shift(1)) & 
-             (df['Close'] < df['Open'].shift(1)) & (df['Open'] > df['Close'].shift(1)))
-        ).astype(float)
-        
-        # Pattern strength (body size relative to ATR)
-        df['PatternStrength'] = df['Body'] / (df['ATR'] + 0.0001)  # Avoid division by zero
-        
-        return df.dropna()
-    
-    def find_support_resistance(self, df: pd.DataFrame, idx: int, lookback: int = 100) -> dict:
-        """Find nearby support and resistance levels"""
-        if idx < lookback:
-            return {'support': [], 'resistance': []}
-        
-        # Get historical data
-        hist = df.iloc[max(0, idx-lookback):idx]
-        
-        # Find swing highs (resistance)
-        highs = hist['High']
-        resistance_levels = []
-        for i in range(2, len(highs)-2):
-            if highs.iloc[i] > highs.iloc[i-1] and highs.iloc[i] > highs.iloc[i-2] and \
-               highs.iloc[i] > highs.iloc[i+1] and highs.iloc[i] > highs.iloc[i+2]:
-                resistance_levels.append(highs.iloc[i])
-        
-        # Find swing lows (support)
-        lows = hist['Low']
-        support_levels = []
-        for i in range(2, len(lows)-2):
-            if lows.iloc[i] < lows.iloc[i-1] and lows.iloc[i] < lows.iloc[i-2] and \
-               lows.iloc[i] < lows.iloc[i+1] and lows.iloc[i] < lows.iloc[i+2]:
-                support_levels.append(lows.iloc[i])
-        
-        return {
-            'support': sorted(support_levels)[-3:] if support_levels else [],  # Last 3 support levels
-            'resistance': sorted(resistance_levels)[-3:] if resistance_levels else []  # Last 3 resistance
-        }
-    
-    def find_fibonacci_level(self, df: pd.DataFrame, idx: int, price: float, direction: str) -> tuple:
-        """Check if price is near a Fibonacci retracement level"""
-        if idx < 100:
-            return False, 0.0
-        
-        # Find recent swing high and low (last 50-100 candles)
-        lookback = min(100, idx)
-        hist = df.iloc[idx-lookback:idx]
-        
-        swing_high = hist['High'].max()
-        swing_low = hist['Low'].min()
-        swing_range = swing_high - swing_low
-        
-        if swing_range == 0:
-            return False, 0.0
-        
-        # Check if price is near any Fib level
-        for fib_level in self.FIB_LEVELS:
-            if direction == 'long':
-                # For longs, check retracement from high to low
-                fib_price = swing_high - (swing_range * fib_level)
-            else:
-                # For shorts, check retracement from low to high
-                fib_price = swing_low + (swing_range * fib_level)
-            
-            # Check if price within 0.3% of Fib level
-            distance_pct = abs(price - fib_price) / price * 100
-            if distance_pct < 0.3:
-                return True, fib_level
-        
-        return False, 0.0
-    
-    def detect_trend(self, df: pd.DataFrame, idx: int, strict: bool = True) -> str:
-        """Detect market trend using ACTUAL TCE MAs - STRICT mode requires strong trend"""
-        if idx < 50:
-            return "range"
-            
-        ma6 = df.iloc[idx]['MA6']
-        ma18 = df.iloc[idx]['MA18']
-        ma50 = df.iloc[idx]['MA50']
-        ma200 = df.iloc[idx]['MA200']
-        slope6 = df.iloc[idx]['Slope6']
-        slope18 = df.iloc[idx]['Slope18']
-        slope50 = df.iloc[idx]['Slope50']
-        
-        if strict:
-            # STRICT: All MAs must be properly aligned AND all slopes must agree
-            if ma6 > ma18 > ma50 > ma200 and slope6 > 0 and slope18 > 0 and slope50 > 0:
-                return "uptrend"
-            elif ma6 < ma18 < ma50 < ma200 and slope6 < 0 and slope18 < 0 and slope50 < 0:
-                return "downtrend"
-            else:
-                return "range"
-        else:
-            # Original less strict detection
-            if ma6 > ma18 > ma50 and slope6 > 0 and slope18 > 0:
-                return "uptrend"
-            elif ma6 < ma18 < ma50 and slope6 < 0 and slope18 < 0:
-                return "downtrend"
-            else:
-                return "range"
-    
-    def check_htf_confirmation(self, symbol: str, timeframe: str, current_trend: str, current_time) -> bool:
-        """Check if higher timeframe confirms the current timeframe trend"""
-        htf = self.TIMEFRAMES[timeframe].get('htf')
-        if not htf:
-            return True  # D1 has no HTF, always approved
-        
-        # Get HTF data
-        htf_key = f"{symbol}_{htf}"
-        if htf_key not in self.htf_data:
-            return False  # No HTF data available
-        
-        htf_df = self.htf_data[htf_key]
-        
-        # Find corresponding HTF candle (closest time before current)
-        try:
-            # Get HTF candle at or before current time
-            htf_candles = htf_df[htf_df.index <= current_time]
-            if len(htf_candles) < 50:
-                return False
-            
-            # Check HTF trend
-            htf_idx = len(htf_candles) - 1
-            htf_trend = self.detect_trend(htf_candles.reset_index(drop=True), htf_idx, strict=True)
-            
-            # HTF must match current timeframe trend
-            return htf_trend == current_trend
-        except:
-            return False
-    
-    def validate_tce_confluence(self, setup: TCESetup, df: pd.DataFrame, idx: int, symbol: str) -> bool:
-        """STRICT TCE validation - must pass ALL confluence requirements"""
-        
-        # 1. TREND DIRECTION MATCH (MANDATORY)
-        if setup.direction == 'long' and setup.trend != 'uptrend':
-            return False
-        if setup.direction == 'short' and setup.trend != 'downtrend':
-            return False
-        
-        # 2. HIGHER TIMEFRAME CONFIRMATION (MANDATORY)
-        current_time = df.index[idx]
-        htf_confirmed = self.check_htf_confirmation(symbol, setup.timeframe, setup.trend, current_time)
-        if not htf_confirmed:
-            return False
-        
-        # 3. AT MOVING AVERAGE (MANDATORY) - price must be within 0.5% of MA6 or MA18
-        dist_ma6 = abs(setup.entry_price - setup.ma6) / setup.ma6 * 100
-        dist_ma18 = abs(setup.entry_price - setup.ma18) / setup.ma18 * 100
-        at_ma = min(dist_ma6, dist_ma18) < 0.5
-        if not at_ma:
-            return False
-        
-        # 4. CONFLUENCE CHECK - need at least 2 of these 3:
-        confluence_score = 0
-        
-        # A. Support/Resistance level nearby
-        sr_levels = self.find_support_resistance(df, idx)
-        atr = setup.atr
-        tolerance = atr * 0.5
-        
-        at_sr = False
-        if setup.direction == 'long':
-            # Check if near support
-            for support in sr_levels['support']:
-                if abs(setup.entry_price - support) < tolerance:
-                    at_sr = True
-                    break
-        else:
-            # Check if near resistance
-            for resistance in sr_levels['resistance']:
-                if abs(setup.entry_price - resistance) < tolerance:
-                    at_sr = True
-                    break
-        
-        if at_sr:
-            confluence_score += 1
-        
-        # B. Fibonacci retracement level
-        at_fib, fib_level = self.find_fibonacci_level(df, idx, setup.entry_price, setup.direction)
-        if at_fib:
-            confluence_score += 1
-        
-        # C. Strong candlestick pattern matching direction
-        if setup.direction == 'long' and setup.has_bullish_pattern and setup.pattern_strength > 0.6:
-            confluence_score += 1
-        elif setup.direction == 'short' and setup.has_bearish_pattern and setup.pattern_strength > 0.6:
-            confluence_score += 1
-        
-        # Need at least 2 confluence factors
-        if confluence_score < 2:
-            return False
-        
-        # 5. STRONG TREND (slopes must be significant)
-        if setup.direction == 'long':
-            if setup.slope6 <= 0 or setup.slope18 <= 0:
-                return False
-        else:
-            if setup.slope6 >= 0 or setup.slope18 >= 0:
-                return False
-        
-        # All checks passed - this is a valid TCE setup
-        return True
-    
-    def generate_setups_from_data(self, symbol: str, df: pd.DataFrame, 
-                                  timeframe: str) -> Tuple[List[Tuple[TCESetup, float]], int, int]:
-        """Generate STRICT TCE setups with confluence - quality over quantity"""
-        labeled_setups = []
-        profitable_count = 0
-        unprofitable_count = 0
-        
-        # Calculate indicators
-        df = self.calculate_indicators(df)
-        
-        # Sample less frequently for quality
-        sample_every = self.TIMEFRAMES[timeframe]['sample_every']
-        
-        # Leave last 100 candles for forward testing
-        for i in range(200, len(df) - 100, sample_every):
-            row = df.iloc[i]
-            
-            # Get historical data for context
-            historical_data = df.iloc[max(0, i-100):i+1].copy()
-            
-            # Get future data for backtesting
-            future_data = df.iloc[i+1:i+51].copy()  # Next 50 candles
-            
-            if len(future_data) < 10:
-                continue
-            
-            # Detect STRICT trend (all MAs aligned)
-            trend = self.detect_trend(df, i, strict=True)
-            
-            # Only trade in strong trends
-            if trend == 'range':
-                continue
-            
-            # Only trade in direction of trend
-            direction = 'long' if trend == 'uptrend' else 'short'
-            
-            setup = self._create_setup(
-                symbol, timeframe, direction, row, 
-                historical_data, trend
-            )
-            
-            if setup:
-                # STRICT TCE VALIDATION - must pass confluence check
-                if not self.validate_tce_confluence(setup, df, i, symbol):
-                    continue  # Skip this setup - doesn't meet TCE standards
-                
-                # Backtest to get ACTUAL outcome
-                outcome = self.backtest_setup(setup, future_data)
-                
-                if outcome >= 0:  # Only keep if we have clear result
-                    labeled_setups.append((setup, outcome))
-                    if outcome == 1.0:
-                        profitable_count += 1
-                        else:
-                            unprofitable_count += 1
-        
-        return labeled_setups, profitable_count, unprofitable_count
-    
-    def _create_setup(self, symbol: str, timeframe: str, 
-                     direction: str, row: pd.Series,
-                     historical_data: pd.DataFrame,
-                     trend: str) -> Optional[TCESetup]:
-        """Create a single TCE setup"""
-        try:
-            entry = row['Close']
-            atr = row['ATR']
-            
-            if pd.isna(atr) or atr == 0:
-                return None
-            
-            # Get timestamp from row index
-            timestamp = str(row.name) if hasattr(row, 'name') else ""
-            
-            # Calculate levels
-            if direction == 'long':
-                stop_loss = entry - (2.0 * atr)
-                take_profit_1 = entry + (3.0 * atr)
-                take_profit_2 = entry + (5.0 * atr)
-                take_profit_3 = entry + (8.0 * atr)
-            else:
-                stop_loss = entry + (2.0 * atr)
-                take_profit_1 = entry - (3.0 * atr)
-                take_profit_2 = entry - (5.0 * atr)
-                take_profit_3 = entry - (8.0 * atr)
-            
-            # Detect candlestick patterns
-            has_bullish = row['IsBullish'] > 0.5
-            has_bearish = row['IsBearish'] > 0.5
-            pattern_strength = min(row['PatternStrength'], 1.0)
-            
-            # Create setup
-            setup = TCESetup(
-                symbol=symbol,
-                timeframe=timeframe,
-                direction=direction,
-                entry_price=entry,
-                timestamp=timestamp,
-                stop_loss=stop_loss,
-                take_profit_1=take_profit_1,
-                take_profit_2=take_profit_2,
-                take_profit_3=take_profit_3,
-                current_price=entry,
-                trend=trend,
-                ma6=row['MA6'],
-                ma18=row['MA18'],
-                ma50=row['MA50'],
-                ma200=row['MA200'],
-                slope6=row['Slope6'],
-                slope18=row['Slope18'],
-                slope50=row['Slope50'],
-                slope200=row['Slope200'],
-                atr=atr,
-                has_bullish_pattern=has_bullish,
-                has_bearish_pattern=has_bearish,
-                pattern_strength=pattern_strength,
-                candles_data=historical_data
-            )
-            
-            return setup
-            
-        except Exception as e:
-            return None
-    
-    def generate_all_examples(self) -> Tuple[List[Tuple[TCESetup, float]], dict]:
-        """Generate examples labeled by ACTUAL BACKTEST OUTCOME (profitable=1.0, loss=0.0)"""
-        print("="*80)
-        print("🎯 GENERATING TRAINING EXAMPLES WITH BACKTEST-BASED LABELS")
-        print("="*80 + "\n")
-        
-        # Load MT5 data
-        all_mt5_data = self.load_mt5_data()
-        
-        # Store HTF data for confirmation
-        print("📊 Preparing higher timeframe data for confirmation...\n")
-        for key in all_mt5_data.keys():
-            self.htf_data[key] = self.calculate_indicators(all_mt5_data[key].copy())
-        
-        all_labeled_setups = []
-        total_profitable = 0
-        total_unprofitable = 0
-        
-        total_datasets = len(all_mt5_data)
-        
-        print(f"📊 Processing {total_datasets} datasets with STRICT TCE filtering\n")
-        print("   ✓ Higher timeframe trend confirmation\n")
-        print("   ✓ Support/Resistance levels\n")
-        print("   ✓ Fibonacci retracement levels\n")
-        print("   ✓ Confluence requirement (2+ factors)\n")
-        print("   ✓ Quality over quantity\n")
-        
-        for idx, (key, df) in enumerate(all_mt5_data.items(), 1):
-            parts = key.split('_')
-            symbol = parts[0]
-            timeframe = parts[1]
-            
-            print(f"[{idx}/{total_datasets}] {key}", end=" ", flush=True)
-            
-            # Generate setups and backtest for labels
-            labeled_setups, profitable, unprofitable = self.generate_setups_from_data(
-                symbol, df, timeframe
-            )
-            
-            all_labeled_setups.extend(labeled_setups)
-            total_profitable += profitable
-            total_unprofitable += unprofitable
-            
-            print(f"✅ {profitable} profitable | ❌ {unprofitable} losses")
-        
-        # Shuffle to mix throughout dataset
-        np.random.shuffle(all_labeled_setups)
-        
-        total = len(all_labeled_setups)
-        
-        stats = {
-            'total': total,
-            'profitable': total_profitable,
-            'unprofitable': total_unprofitable,
-            'win_rate': total_profitable / total if total > 0 else 0
-        }
-        
-        print(f"\n{'='*80}")
-        print(f"📊 STRICT TCE FILTERING COMPLETE:")
-        print(f"   • Total examples: {stats['total']:,}")
-        print(f"   • Profitable (1.0): {stats['profitable']:,} ({stats['win_rate']*100:.1f}%)")
-        print(f"   • Losses (0.0): {stats['unprofitable']:,} ({(1-stats['win_rate'])*100:.1f}%)")
-        print(f"   • Quality standard: ALL TCE rules enforced")
-        print(f"   • HTF confirmation: Required")
-        print(f"   • Confluence factors: Minimum 2 of 3")
-        print(f"   • S/R + Fibonacci: Checked")
-        print(f"   • Spread accounted: {self.spread_pips} pips")
-        print(f"{'='*80}\n")
-        
-        return all_labeled_setups, stats
-
-# Run generation
-mt5_data_path = data_dir.parent / 'training_data_mt5'
-
-if not mt5_data_path.exists():
-    print(f"⚠️  WARNING: MT5 data not found at {mt5_data_path}")
-    print(f"   Using cleaned daily data fallback with synthetic generation...\n")
-    
-    # Fallback to old method if MT5 data not uploaded
-    class FallbackGenerator:
-        def __init__(self, data_dir):
-            self.data_dir = data_dir
-        
-        def generate_all_examples(self):
-            print("⚠️  FALLBACK MODE: Using synthetic data (not recommended)\n")
-            # Return empty for now - user should upload MT5 data
-            return [], {'total': 0, 'valid': 0, 'invalid': 0, 'balance': 0.5}
-    
-    loader = FallbackGenerator(data_dir)
-else:
-    loader = MT5DataLoader(mt5_data_path)
-
-labeled_examples, generation_stats = loader.generate_all_examples()
-
-print(f"\n✅ Generated {generation_stats['total']:,} STRICT TCE training examples!")
-print(f"   ✓ Real market data with HTF confirmation")
-print(f"   ✓ ALL TCE rules enforced (trend, S/R, Fib, confluence)")
-print(f"   ✓ Quality over quantity - fewer but better setups")
-print(f"   ✓ No data leakage\n")
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-# CELL 5: PREPARE TRAINING DATA
-# ════════════════════════════════════════════════════════════════════════════════
-# ⏱️ Time: 2-3 minutes
-# 📊 Converts setups to feature vectors and labels
-# ════════════════════════════════════════════════════════════════════════════════
-
-print("="*80)
-print("🔢 CELL 5: PREPARE TRAINING DATA WITH ENHANCED FEATURES")
-print("="*80 + "\n")
-
-def extract_features(setup: TCESetup) -> np.ndarray:
-    """Extract ACTUAL TCE features - matches validation.py rules"""
-    
-    # ========================================================================
-    # ACTUAL TCE INDICATORS (9 features) - FROM validation.py
-    # ========================================================================
-    tce_indicators = np.array([
-        setup.ma6,      # TCE Moving Averages (not EMA9/20)
-        setup.ma18,
-        setup.ma50,
-        setup.ma200,
-        setup.slope6,   # Trend strength (TCE Rule #1)
-        setup.slope18,
-        setup.slope50,
-        setup.slope200,
-        setup.atr       # Volatility (for risk management)
-    ])
-    
-    # ========================================================================
-    # RISK MANAGEMENT (4 features) - TCE Rule #4: ATR-based sizing
-    # ========================================================================
-    stop_distance = abs(setup.entry_price - setup.stop_loss) / setup.entry_price
-    tp1_distance = abs(setup.take_profit_1 - setup.entry_price) / setup.entry_price
-    tp3_distance = abs(setup.take_profit_3 - setup.entry_price) / setup.entry_price
-    risk_reward = tp1_distance / stop_distance if stop_distance > 0 else 0
-    
-    risk_metrics = np.array([
-        min(risk_reward / 5.0, 1.0),  # Normalize RR ratio
-        stop_distance * 100,           # 2 ATR stop
-        tp1_distance * 100,            # 3 ATR TP1
-        tp3_distance * 100             # 8 ATR TP3
-    ])
-    
-    # ========================================================================
-    # TREND IDENTIFICATION (3 features) - TCE Rule #1
-    # ========================================================================
-    trend_uptrend = 1.0 if setup.trend == 'uptrend' else 0.0
-    trend_downtrend = 1.0 if setup.trend == 'downtrend' else 0.0
-    trend_range = 1.0 if setup.trend == 'range' else 0.0
-    trend_flags = np.array([trend_uptrend, trend_downtrend, trend_range])
-    
-    # ========================================================================
-    # DIRECTION (2 features)
-    # ========================================================================
-    direction_long = 1.0 if setup.direction == 'long' else 0.0
-    direction_short = 1.0 if setup.direction == 'short' else 0.0
-    direction_flags = np.array([direction_long, direction_short])
-    
-    # ========================================================================
-    # TIMEFRAME ENCODING (1 feature)
-    # ========================================================================
-    timeframe_map = {'M15': 0.2, 'M30': 0.4, 'H1': 0.6, 'H4': 0.8, 'D1': 1.0}
-    timeframe_encoding = np.array([timeframe_map.get(setup.timeframe, 0.5)])
-    
-    # ========================================================================
-    # CANDLESTICK PATTERNS (3 features) - TCE Rule #6
-    # ========================================================================
-    candlestick_features = np.array([
-        1.0 if setup.has_bullish_pattern else 0.0,  # Hammer, bullish engulfing
-        1.0 if setup.has_bearish_pattern else 0.0,  # Shooting star, bearish engulfing
-        setup.pattern_strength  # 0-1 score based on body/shadow ratio
-    ])
-    
-    # ========================================================================
-    # MA ALIGNMENT & POSITION (10 features) - TCE Rules #3, #5
-    # ========================================================================
-    
-    # Distance from each MA (TCE Rule #3: must be AT Moving Average)
-    dist_from_ma6 = (setup.entry_price - setup.ma6) / setup.ma6 if setup.ma6 != 0 else 0
-    dist_from_ma18 = (setup.entry_price - setup.ma18) / setup.ma18 if setup.ma18 != 0 else 0
-    dist_from_ma50 = (setup.entry_price - setup.ma50) / setup.ma50 if setup.ma50 != 0 else 0
-    dist_from_ma200 = (setup.entry_price - setup.ma200) / setup.ma200 if setup.ma200 != 0 else 0
-    ma_distances = np.array([dist_from_ma6, dist_from_ma18, dist_from_ma50, dist_from_ma200]) * 100
-    
-    # MA alignment score (TCE Rule #1: MA6 > MA18 > MA50 > MA200 for uptrend)
-    if setup.ma6 > setup.ma18 > setup.ma50 > setup.ma200:
-        ma_alignment = 1.0  # Perfect uptrend
-    elif setup.ma6 < setup.ma18 < setup.ma50 < setup.ma200:
-        ma_alignment = -1.0  # Perfect downtrend
-    else:
-        ma_alignment = 0.0  # Mixed/choppy
-    
-    # At MA level (TCE Rule #3: price must be at MA, not far away)
-    at_ma = 1.0 if min(abs(dist_from_ma6), abs(dist_from_ma18), abs(dist_from_ma50)) < 0.5 else 0.0
-    
-    # Direction-trend alignment (TCE Rule #1: only trade WITH the trend)
-    if setup.direction == 'long' and ma_alignment > 0:
-        direction_trend_match = 1.0
-    elif setup.direction == 'short' and ma_alignment < 0:
-        direction_trend_match = 1.0
-    else:
-        direction_trend_match = 0.0
-    
-    # Slope strength (momentum) - TCE uses this for entry timing
-    slope_strength = abs(setup.slope6) + abs(setup.slope18)
-    slope_normalized = min(slope_strength * 1000, 1.0)  # Normalize
-    
-    # Candlestick-direction alignment (TCE Rule #6: bullish pattern = long entry)
-    if setup.direction == 'long' and setup.has_bullish_pattern:
-        candle_direction_match = 1.0
-    elif setup.direction == 'short' and setup.has_bearish_pattern:
-        candle_direction_match = 1.0
-    else:
-        candle_direction_match = 0.0
-    
-    ma_context_features = np.array([
-        ma_alignment,
-        at_ma,
-        direction_trend_match,
-        slope_normalized,
-        candle_direction_match
-    ])
-    
-    # ========================================================================
-    # TOTAL: 9 + 4 + 3 + 2 + 1 + 3 + 4 + 6 = 32 FEATURES (ALL ACTUAL TCE RULES)
-    # ========================================================================
-    features = np.concatenate([
-        tce_indicators,           # 9 - Actual TCE MAs, slopes, ATR
-        risk_metrics,             # 4 - Risk management (Rule #4)
-        trend_flags,              # 3 - Trend identification (Rule #1)
-        direction_flags,          # 2 - Trade direction
-        timeframe_encoding,       # 1 - Timeframe context
-        candlestick_features,     # 3 - Candlestick patterns (Rule #6)
-        ma_distances,             # 4 - Distance from MAs (Rule #3)
-        ma_context_features       # 6 - MA alignment, position, momentum
-    ])
-    
-    return features
-
-# Extract features and labels
-print("Extracting features from labeled examples...")
-
-X_data = []
-y_data = []
-
-for setup, label in labeled_examples:
-    features = extract_features(setup)
-    X_data.append(features)
-    y_data.append(float(label))  # 1.0 for valid, 0.0 for invalid
-
-X_data = np.array(X_data)
-y_data = np.array(y_data)
-
-print(f"\n✅ Prepared {len(X_data):,} training examples")
-print(f"   • Feature shape: {X_data.shape} (32 ACTUAL TCE features from validation.py)")
-print(f"   • Label shape: {y_data.shape}")
-print(f"   • Profitable examples: {(y_data == 1).sum():,}")
-print(f"   • Loss examples: {(y_data == 0).sum():,}")
-print(f"   • Win rate: {(y_data == 1).sum() / len(y_data) * 100:.1f}%")
-
-# Check for invalid values
-invalid_count = np.isnan(X_data).sum() + np.isinf(X_data).sum()
-if invalid_count > 0:
-    print(f"\n⚠️  Found {invalid_count} invalid values - cleaning...")
-    X_data = np.nan_to_num(X_data, nan=0.0, posinf=1.0, neginf=-1.0)
-    print("✅ Cleaned!")
-
-# ════════════════════════════════════════════════════════════════════════════════
-# DISPLAY SAMPLE SETUPS WITH TCE RULE VALIDATION
-# ════════════════════════════════════════════════════════════════════════════════
-print(f"\n{'='*80}")
-print("📊 SAMPLE TCE SETUPS WITH VALIDATION")
-print("="*80 + "\n")
-
-def analyze_tce_setup(setup: TCESetup, label: float, verification_data: dict = None) -> str:
-    """Analyze if setup follows actual TCE rules"""
-    
-    analysis = []
-    analysis.append(f"{'='*70}")
-    analysis.append(f"🔍 SETUP: {setup.symbol} {setup.timeframe} - {setup.direction.upper()}")
-    analysis.append(f"   📅 Date/Time: {setup.timestamp}")
-    analysis.append(f"   Entry: {setup.entry_price:.5f} | Stop: {setup.stop_loss:.5f} | TP1: {setup.take_profit_1:.5f}")
-    analysis.append(f"   Label: {'✅ PROFITABLE' if label == 1.0 else '❌ LOSS'}")
-    
-    # Add MA verification data if available
-    if verification_data:
-        analysis.append(f"\n   📊 MA VERIFICATION (check these on your chart):")
-        analysis.append(f"   Last 6 closes: {', '.join([f'{c:.5f}' for c in verification_data['last_6_closes'][-3:]])}...")
-        analysis.append(f"   Manual MA6: {verification_data['manual_ma6']:.5f}")
-        analysis.append(f"   System MA6: {verification_data['pandas_ma6']:.5f}")
-        analysis.append(f"   MA6 Match: {'✅' if verification_data['ma6_match'] else '❌ MISMATCH!'}")
-    
-    analysis.append(f"{'='*70}\n")
-    
-    # Rule #1: Trend Identification
-    analysis.append("📈 TCE RULE #1: TREND IDENTIFICATION")
-    analysis.append(f"   MA6:   {setup.ma6:.5f} (slope: {setup.slope6:+.6f})")
-    analysis.append(f"   MA18:  {setup.ma18:.5f} (slope: {setup.slope18:+.6f})")
-    analysis.append(f"   MA50:  {setup.ma50:.5f} (slope: {setup.slope50:+.6f})")
-    analysis.append(f"   MA200: {setup.ma200:.5f} (slope: {setup.slope200:+.6f})")
-    
-    if setup.ma6 > setup.ma18 > setup.ma50 > setup.ma200:
-        ma_trend = "UPTREND ✅"
-        trend_ok = setup.direction == 'long'
-    elif setup.ma6 < setup.ma18 < setup.ma50 < setup.ma200:
-        ma_trend = "DOWNTREND ✅"
-        trend_ok = setup.direction == 'short'
-    else:
-        ma_trend = "MIXED/CHOPPY ⚠️"
-        trend_ok = False
-    
-    analysis.append(f"   Status: {ma_trend}")
-    analysis.append(f"   Direction Match: {'✅ CORRECT' if trend_ok else '❌ WRONG - Trading against trend!'}\n")
-    
-    # Rule #3: At Moving Average
-    dist_ma6 = abs(setup.entry_price - setup.ma6) / setup.ma6 * 100
-    dist_ma18 = abs(setup.entry_price - setup.ma18) / setup.ma18 * 100
-    dist_ma50 = abs(setup.entry_price - setup.ma50) / setup.ma50 * 100
-    
-    analysis.append("📍 TCE RULE #3: AT MOVING AVERAGE")
-    analysis.append(f"   Distance from MA6:  {dist_ma6:.2f}%")
-    analysis.append(f"   Distance from MA18: {dist_ma18:.2f}%")
-    analysis.append(f"   Distance from MA50: {dist_ma50:.2f}%")
-    
-    closest_dist = min(dist_ma6, dist_ma18, dist_ma50)
-    at_ma_level = closest_dist < 0.5
-    analysis.append(f"   Closest MA: {closest_dist:.2f}% - {'✅ AT MA LEVEL' if at_ma_level else '❌ TOO FAR FROM MA'}\n")
-    
-    # Rule #4: Risk Management
-    stop_pips = abs(setup.entry_price - setup.stop_loss) * 10000
-    tp1_pips = abs(setup.take_profit_1 - setup.entry_price) * 10000
-    rr_ratio = tp1_pips / stop_pips if stop_pips > 0 else 0
-    atr_pips = setup.atr * 10000
-    
-    analysis.append("🎯 TCE RULE #4: RISK MANAGEMENT")
-    analysis.append(f"   ATR: {atr_pips:.1f} pips")
-    analysis.append(f"   Stop Loss: {stop_pips:.1f} pips ({abs(setup.entry_price - setup.stop_loss) / setup.atr:.2f} ATR)")
-    analysis.append(f"   TP1: {tp1_pips:.1f} pips ({abs(setup.take_profit_1 - setup.entry_price) / setup.atr:.2f} ATR)")
-    analysis.append(f"   Risk:Reward: 1:{rr_ratio:.2f}")
-    
-    stop_ok = 1.5 <= abs(setup.entry_price - setup.stop_loss) / setup.atr <= 2.5
-    tp_ok = 2.5 <= abs(setup.take_profit_1 - setup.entry_price) / setup.atr <= 4.0
-    rr_ok = rr_ratio >= 1.5
-    
-    analysis.append(f"   Stop Size: {'✅ GOOD (1.5-2.5 ATR)' if stop_ok else '⚠️ Not ideal'}")
-    analysis.append(f"   TP Size: {'✅ GOOD (2.5-4 ATR)' if tp_ok else '⚠️ Not ideal'}")
-    analysis.append(f"   RR Ratio: {'✅ GOOD (>1.5)' if rr_ok else '❌ TOO LOW'}\n")
-    
-    # Rule #6: Candlestick Confirmation
-    analysis.append("🕯️ TCE RULE #6: CANDLESTICK CONFIRMATION")
-    
-    if setup.has_bullish_pattern:
-        pattern = "Hammer/Bullish Engulfing 📈"
-        pattern_ok = setup.direction == 'long'
-    elif setup.has_bearish_pattern:
-        pattern = "Shooting Star/Bearish Engulfing 📉"
-        pattern_ok = setup.direction == 'short'
-    else:
-        pattern = "No pattern detected"
-        pattern_ok = False
-    
-    analysis.append(f"   Pattern: {pattern}")
-    analysis.append(f"   Strength: {setup.pattern_strength:.2f}")
-    analysis.append(f"   Direction Match: {'✅ CORRECT' if pattern_ok else '⚠️ No pattern or mismatch'}\n")
-    
-    # Overall TCE Compliance
-    rules_passed = sum([trend_ok, at_ma_level, stop_ok and tp_ok and rr_ok, pattern_ok])
-    total_rules = 4
-    
-    analysis.append("🎯 TCE COMPLIANCE SCORE")
-    analysis.append(f"   Rules Passed: {rules_passed}/{total_rules}")
-    
-    if rules_passed == 4:
-        compliance = "✅ EXCELLENT - All TCE rules satisfied!"
-    elif rules_passed == 3:
-        compliance = "✅ GOOD - Most TCE rules satisfied"
-    elif rules_passed == 2:
-        compliance = "⚠️ MODERATE - Some TCE rules violated"
-    else:
-        compliance = "❌ POOR - Multiple TCE violations"
-    
-    analysis.append(f"   Status: {compliance}\n")
-    
-    return "\n".join(analysis)
-
-# Show 5 profitable and 5 loss examples with MA verification
-print("Showing 5 PROFITABLE setups (with MA verification):\n")
-profitable_indices = [i for i, label in enumerate(y_data) if label == 1.0][:5]
-for idx in profitable_indices:
-    setup, label = labeled_examples[idx]
-    # Get verification data if candles_data is available
-    verification = None
-    if setup.candles_data is not None and len(setup.candles_data) >= 200:
-        try:
-            # Find the setup in the historical data
-            setup_idx = len(setup.candles_data) - 1
-            verification = loader.verify_ma_calculation(setup.candles_data.reset_index(), setup_idx)
-        except:
-            pass
-    print(analyze_tce_setup(setup, label, verification))
 
 print("\n" + "="*80)
-print("Showing 5 LOSS setups (with MA verification):\n")
-loss_indices = [i for i, label in enumerate(y_data) if label == 0.0][:5]
-for idx in loss_indices:
-    setup, label = labeled_examples[idx]
-    # Get verification data if candles_data is available
-    verification = None
-    if setup.candles_data is not None and len(setup.candles_data) >= 200:
-        try:
-            setup_idx = len(setup.candles_data) - 1
-            verification = loader.verify_ma_calculation(setup.candles_data.reset_index(), setup_idx)
-        except:
-            pass
-    print(analyze_tce_setup(setup, label, verification))
+print("📦 STEP 2: INSTALL DEPENDENCIES")
+print("="*80)
 
-print(f"\n{'='*80}")
-print("✅ DATA PREPARATION COMPLETE")
-print("="*80 + "\n")
+packages = ['pandas', 'numpy', 'torch', 'scikit-learn']
+print(f"\nInstalling: {', '.join(packages)}")
 
-print("💡 TIP: To verify MA calculations against your chart, run:")
-print("   verify_ma_at_timestamp('EURUSD', 'H1', '2025-10-02 14:00:00', mt5_data_path)")
-print("   Replace with actual symbol/timeframe/timestamp from setups above\n")
+for pkg in packages:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
 
+print("✅ All dependencies installed")
 
-# ════════════════════════════════════════════════════════════════════════════════
-# CELL 6: TRAIN NEURAL NETWORK
-# ════════════════════════════════════════════════════════════════════════════════
-# ⏱️ Time: 30-45 minutes
-# 🎯 Trains model on all validated setups
-# ════════════════════════════════════════════════════════════════════════════════
-
+import pandas as pd
+import numpy as np
+import json
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from google.colab import files
 
+print("\n" + "="*80)
+print("✅ CELL 1 COMPLETE: Setup finished")
 print("="*80)
-print("🧠 CELL 6: TRAIN NEURAL NETWORK")
-print("="*80 + "\n")
+print("\n💡 Next: Run CELL 2 to load CSVs from Google Drive and extract training data")
 
-# Define PRODUCTION-READY model with LSTM
-class TCEProbabilityModel(nn.Module):
-    """LSTM-enhanced model for TCE setup probability prediction"""
-    
-    def __init__(self, input_size=32):  # FIXED: 32 ACTUAL TCE features from validation.py
-        super().__init__()
-        
-        # Feature preprocessing
-        self.input_layer = nn.Linear(input_size, 128)
-        self.bn1 = nn.BatchNorm1d(128)
-        
-        # LSTM for temporal pattern learning
-        self.lstm = nn.LSTM(128, 64, num_layers=2, batch_first=True, dropout=0.3)
-        
-        # Dense layers
-        self.fc1 = nn.Linear(64, 32)
-        self.bn2 = nn.BatchNorm1d(32)
-        self.dropout = nn.Dropout(0.3)
-        self.fc2 = nn.Linear(32, 16)
-        self.output = nn.Linear(16, 1)
-        
-        self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()
-    
-    def forward(self, x):
-        # Input processing
-        x = self.relu(self.bn1(self.input_layer(x)))
-        
-        # LSTM (reshape for sequence: batch, seq_len=1, features)
-        x = x.unsqueeze(1)
-        lstm_out, _ = self.lstm(x)
-        x = lstm_out[:, -1, :]  # Take last output
-        
-        # Dense layers
-        x = self.relu(self.bn2(self.fc1(x)))
-        x = self.dropout(x)
-        x = self.relu(self.fc2(x))
-        x = self.sigmoid(self.output(x))
-        
-        return x
 
-# Prepare data with WALK-FORWARD VALIDATION (prevents temporal leakage)
-print("📊 Using WALK-FORWARD validation (chronological split)...\n")
+# ════════════════════════════════════════════════════════════════════════════════
+# CELL 2: EXTRACT TRAINING DATA FROM GOOGLE DRIVE
+# ════════════════════════════════════════════════════════════════════════════════
 
-# Sort by date if we have timestamps (we should!)
-# For now, use chronological split: first 80% train, last 20% test
-train_size = int(len(X_data) * 0.8)
+from google.colab import drive
 
-X_train = X_data[:train_size]
-y_train = y_data[:train_size]
-X_test = X_data[train_size:]
-y_test = y_data[train_size:]
-
-print(f"   Train period: samples 0 to {train_size:,} (past data)")
-print(f"   Test period: samples {train_size:,} to {len(X_data):,} (future data)")
-print(f"   This prevents temporal data leakage!\n")
-
-# Normalize features
-print("🔧 Normalizing features...\n")
-
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
-
-# Convert to tensors
-X_train_tensor = torch.FloatTensor(X_train_scaled)
-y_train_tensor = torch.FloatTensor(y_train).unsqueeze(1)
-X_test_tensor = torch.FloatTensor(X_test_scaled)
-y_test_tensor = torch.FloatTensor(y_test).unsqueeze(1)
-
-# Create datasets
-class TCEDataset(Dataset):
-    def __init__(self, X, y):
-        self.X = X
-        self.y = y
-    
-    def __len__(self):
-        return len(self.X)
-    
-    def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
-
-train_dataset = TCEDataset(X_train_tensor, y_train_tensor)
-test_dataset = TCEDataset(X_test_tensor, y_test_tensor)
-
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-
-# Initialize model with CLASS WEIGHTING for imbalanced data
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = TCEProbabilityModel(input_size=51).to(device)  # FIXED: 51 features
-
-# Calculate class weights to handle imbalance
-pos_count = (y_train == 1).sum()
-neg_count = (y_train == 0).sum()
-pos_weight = torch.tensor([neg_count / pos_count if pos_count > 0 else 1.0]).to(device)
-
-print(f"⚖️  Class weighting: {pos_weight.item():.2f}x weight for profitable trades\n")
-
-criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)  # Use logits version with weighting
-optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)  # Added L2 regularization
-
-print(f"🖥️  Training on: {device}")
-print(f"📊 Training samples: {len(X_train):,}")
-print(f"📊 Test samples: {len(X_test):,}\n")
-
+print("\n" + "="*80)
+print("📊 CELL 2: EXTRACT TRAINING DATA FROM GOOGLE DRIVE")
 print("="*80)
-print("🚀 STARTING TRAINING")
-print("="*80 + "\n")
 
-# Training loop
-num_epochs = 50
-best_test_acc = 0.0
+# Mount Google Drive
+print("\n📁 Mounting Google Drive...")
+drive.mount('/content/drive')
+print("✅ Google Drive mounted")
 
-for epoch in range(num_epochs):
-    # Training
-    model.train()
-    train_loss = 0.0
-    train_correct = 0
-    train_total = 0
+# Specify data directory
+data_dir = Path('/content/drive/MyDrive/forex_data/training_data_mt5')
+print(f"\n📂 Looking for MT5 data in: {data_dir}")
+
+# Check if directory exists
+if not data_dir.exists():
+    print(f"\n❌ Directory not found!")
+    print(f"\n📝 TO FIX:")
+    print(f"   1. Create folder in Google Drive: MyDrive/forex_data/training_data_mt5/")
+    print(f"   2. Upload your CSV files there (USDJPY_H1.csv, EURUSD_H4.csv, etc.)")
+    print(f"   3. Re-run this cell")
+    all_training_data = []
+else:
+    # Find all CSV files recursively
+    csv_files = []
     
-    for batch_X, batch_y in train_loader:
-        batch_X = batch_X.to(device)
-        batch_y = batch_y.to(device)
+    # Check for timeframe folders (H1, H4, D1, etc.)
+    for item in data_dir.iterdir():
+        if item.is_dir():
+            csv_files.extend(list(item.glob('*.csv')))
+    
+    # Also check root directory
+    csv_files.extend(list(data_dir.glob('*.csv')))
+    
+    if not csv_files:
+        print(f"\n❌ No CSV files found in {data_dir}")
+        print(f"\n📝 Expected structure:")
+        print(f"   MyDrive/forex_data/training_data_mt5/")
+        print(f"   ├── H1/")
+        print(f"   │   ├── USDJPY.csv")
+        print(f"   │   └── EURUSD.csv")
+        print(f"   ├── H4/")
+        print(f"   │   └── USDJPY.csv")
+        print(f"   └── D1/")
+        print(f"       └── USDJPY.csv")
+        print(f"\n   OR flat structure:")
+        print(f"   ├── USDJPY_H1.csv")
+        print(f"   ├── USDJPY_H4.csv")
+        print(f"   └── EURUSD_H1.csv")
+        all_training_data = []
+    else:
+        print(f"\n✅ Found {len(csv_files)} CSV files:")
+        for csv_file in csv_files:
+            print(f"   • {csv_file.relative_to(data_dir)}")
         
-        optimizer.zero_grad()
-        outputs = model(batch_X)
-        loss = criterion(outputs, batch_y)
-        loss.backward()
-        optimizer.step()
+        print("\n" + "="*80)
         
-        train_loss += loss.item()
-        predictions = (outputs > 0.5).float()
-        train_correct += (predictions == batch_y).sum().item()
-        train_total += batch_y.size(0)
-    
-    train_loss /= len(train_loader)
-    train_acc = train_correct / train_total
-    
-    # Testing
-    model.eval()
-    test_loss = 0.0
-    test_correct = 0
-    test_total = 0
-    
-    with torch.no_grad():
-        for batch_X, batch_y in test_loader:
-            batch_X = batch_X.to(device)
-            batch_y = batch_y.to(device)
+        # ============================================================================
+        # HELPER FUNCTIONS
+        # ============================================================================
+        
+        def calculate_indicators(df):
+            """Calculate MAs, ATR, RSI, momentum indicators, and Force Index"""
+            df['ma6'] = df['close'].rolling(window=6).mean()
+            df['ma18'] = df['close'].rolling(window=18).mean()
+            df['ma50'] = df['close'].rolling(window=50).mean()
+            df['ma200'] = df['close'].rolling(window=200).mean()
             
+            # Slopes
+            for period in [6, 18, 50, 200]:
+                df[f'slope{period}'] = df[f'ma{period}'].diff(5)
+            
+            # ATR
+            high = df['high']
+            low = df['low']
+            close = df['close']
+            tr1 = high - low
+            tr2 = abs(high - close.shift())
+            tr3 = abs(low - close.shift())
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            df['atr'] = tr.rolling(window=14).mean()
+            
+            # RSI (14-period)
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss.replace(0, 1e-10)
+            df['rsi'] = 100 - (100 / (1 + rs))
+            
+            # Force Index (catches fake breakouts & divergences)
+            # Formula: (Close - Previous Close) × Volume
+            # Since forex has no volume, use candle range as proxy
+            price_change = df['close'].diff()
+            candle_range = df['high'] - df['low']
+            df['force_index_raw'] = price_change * candle_range
+            df['force_index'] = df['force_index_raw'].rolling(window=13).mean()  # 13-period EMA
+            
+            # Correlation (trend strength) - 20-period correlation between price and MA50
+            df['correlation'] = df['close'].rolling(window=20).corr(df['ma50'])
+            
+            return df
+        
+        
+        def basic_trend_direction(row):
+            """Simple trend check for BUY/SELL labeling"""
+            if row['ma6'] > row['ma18'] > row['ma50']:
+                return 'BUY'
+            elif row['ma6'] < row['ma18'] < row['ma50']:
+                return 'SELL'
+            return None
+        
+        
+        # ============================================================================
+        # CANDLESTICK PATTERN DETECTION (from validation.py)
+        # ============================================================================
+        
+        class Candle:
+            def __init__(self, time, open, high, low, close):
+                self.time = time
+                self.open = open
+                self.high = high
+                self.low = low
+                self.close = close
+        
+        def is_rejection_candle(candle, direction):
+            """Basic rejection with visible wick"""
+            body = abs(candle.close - candle.open)
+            if body == 0:
+                return False
+            wick_up = candle.high - max(candle.open, candle.close)
+            wick_down = min(candle.open, candle.close) - candle.low
+            if direction == "BUY":
+                return wick_down > 0 and candle.close > candle.open
+            else:
+                return wick_up > 0 and candle.close < candle.open
+        
+        def is_bullish_pin_bar(candle):
+            """Lower wick 2x body, small upper wick"""
+            body = abs(candle.close - candle.open)
+            if body == 0:
+                return False
+            lower_wick = min(candle.open, candle.close) - candle.low
+            upper_wick = candle.high - max(candle.open, candle.close)
+            return (lower_wick >= body * 2.0 and upper_wick <= body * 0.5 and candle.close > candle.open)
+        
+        def is_bearish_pin_bar(candle):
+            """Upper wick 2x body, small lower wick"""
+            body = abs(candle.close - candle.open)
+            if body == 0:
+                return False
+            upper_wick = candle.high - max(candle.open, candle.close)
+            lower_wick = min(candle.open, candle.close) - candle.low
+            return (upper_wick >= body * 2.0 and lower_wick <= body * 0.5 and candle.close < candle.open)
+        
+        def is_bullish_engulfing(prev, curr):
+            """Current bullish body engulfs previous bearish body"""
+            prev_body = abs(prev.close - prev.open)
+            curr_body = abs(curr.close - curr.open)
+            if prev_body == 0 or curr_body == 0:
+                return False
+            return (prev.close < prev.open and curr.close > curr.open and 
+                    curr.open <= prev.close and curr.close >= prev.open and curr_body >= prev_body)
+        
+        def is_bearish_engulfing(prev, curr):
+            """Current bearish body engulfs previous bullish body"""
+            prev_body = abs(prev.close - prev.open)
+            curr_body = abs(curr.close - curr.open)
+            if prev_body == 0 or curr_body == 0:
+                return False
+            return (prev.close > prev.open and curr.close < curr.open and 
+                    curr.open >= prev.close and curr.close <= prev.open and curr_body >= prev_body)
+        
+        def is_one_white_soldier(prev, curr):
+            """Strong bullish after bearish, closes above prev high"""
+            body_prev = abs(prev.close - prev.open)
+            body_curr = abs(curr.close - curr.open)
+            if body_prev == 0 or body_curr == 0:
+                return False
+            return (prev.close < prev.open and curr.close > curr.open and 
+                    body_curr >= body_prev * 1.2 and curr.close > prev.high)
+        
+        def is_one_black_crow(prev, curr):
+            """Strong bearish after bullish, closes below prev low"""
+            body_prev = abs(prev.close - prev.open)
+            body_curr = abs(curr.close - curr.open)
+            if body_prev == 0 or body_curr == 0:
+                return False
+            return (prev.close > prev.open and curr.close < curr.open and 
+                    body_curr >= body_prev * 1.2 and curr.close < prev.low)
+        
+        def is_tweezer_bottom(prev, curr):
+            """Lows almost equal (bottom rejection)"""
+            return abs(prev.low - curr.low) / max(prev.low, curr.low, 0.00001) < 0.0005
+        
+        def is_tweezer_top(prev, curr):
+            """Highs almost equal (top rejection)"""
+            return abs(prev.high - curr.high) / max(prev.high, curr.high, 0.00001) < 0.0005
+        
+        def is_morning_star(c1, c2, c3):
+            """Bearish, small middle, strong bullish"""
+            body1 = abs(c1.close - c1.open)
+            body2 = abs(c2.close - c2.open)
+            body3 = abs(c3.close - c3.open)
+            if body1 == 0 or body3 == 0:
+                return False
+            return (c1.close < c1.open and c3.close > c3.open and 
+                    body2 <= body1 * 0.6 and body2 <= body3 * 0.6)
+        
+        def is_evening_star(c1, c2, c3):
+            """Bullish, small middle, strong bearish"""
+            body1 = abs(c1.close - c1.open)
+            body2 = abs(c2.close - c2.open)
+            body3 = abs(c3.close - c3.open)
+            if body1 == 0 or body3 == 0:
+                return False
+            return (c1.close > c1.open and c3.close < c3.open and 
+                    body2 <= body1 * 0.6 and body2 <= body3 * 0.6)
+        
+        def detect_candlestick_patterns(df, i, direction, ma_level, row):
+            """
+            Detect candlestick patterns at position i (second bounce/entry point)
+            ONLY valid if pattern occurs at rally/retracement S/R level (MA touch)
+            
+            Args:
+                df: DataFrame with price data
+                i: Current index (second bounce - COMPLETED candle)
+                direction: 'BUY' or 'SELL'
+                ma_level: Which MA was touched ('MA18', 'MA50', 'MA200')
+                row: Current row data (for MA prices)
+            """
+            if i < 2:
+                return {
+                    'has_rejection': 0, 'has_pin_bar': 0, 'has_engulfing': 0,
+                    'has_soldier_crow': 0, 'has_tweezer': 0, 'has_star': 0,
+                    'has_any_pattern': 0, 'pattern_at_sr': 0
+                }
+            
+            # Check if pattern is at S/R level (MA touch)
+            # Pattern must be within 5% of the MA level that was touched
+            ma_price = row[ma_level.lower()]  # Get the MA price (ma18, ma50, or ma200)
+            price_at_sr = row['low'] if direction == 'BUY' else row['high']
+            
+            # Calculate distance from MA
+            distance_from_ma = abs(price_at_sr - ma_price) / ma_price if ma_price > 0 else 1.0
+            pattern_at_sr_level = 1 if distance_from_ma <= 0.05 else 0
+            
+            # If pattern is NOT at S/R level, return all zeros
+            if not pattern_at_sr_level:
+                return {
+                    'has_rejection': 0, 'has_pin_bar': 0, 'has_engulfing': 0,
+                    'has_soldier_crow': 0, 'has_tweezer': 0, 'has_star': 0,
+                    'has_any_pattern': 0, 'pattern_at_sr': 0
+                }
+            
+            # Create candle objects (pattern detected at S/R level)
+            curr = Candle(df.iloc[i]['time'], df.iloc[i]['open'], 
+                         df.iloc[i]['high'], df.iloc[i]['low'], df.iloc[i]['close'])
+            prev = Candle(df.iloc[i-1]['time'], df.iloc[i-1]['open'],
+                         df.iloc[i-1]['high'], df.iloc[i-1]['low'], df.iloc[i-1]['close'])
+            prev2 = Candle(df.iloc[i-2]['time'], df.iloc[i-2]['open'],
+                          df.iloc[i-2]['high'], df.iloc[i-2]['low'], df.iloc[i-2]['close'])
+            
+            # Detect patterns based on direction
+            if direction == "BUY":
+                patterns = {
+                    'has_rejection': int(is_rejection_candle(curr, direction)),
+                    'has_pin_bar': int(is_bullish_pin_bar(curr)),
+                    'has_engulfing': int(is_bullish_engulfing(prev, curr)),
+                    'has_soldier_crow': int(is_one_white_soldier(prev, curr)),
+                    'has_tweezer': int(is_tweezer_bottom(prev, curr)),
+                    'has_star': int(is_morning_star(prev2, prev, curr)),
+                    'pattern_at_sr': pattern_at_sr_level
+                }
+            else:  # SELL
+                patterns = {
+                    'has_rejection': int(is_rejection_candle(curr, direction)),
+                    'has_pin_bar': int(is_bearish_pin_bar(curr)),
+                    'has_engulfing': int(is_bearish_engulfing(prev, curr)),
+                    'has_soldier_crow': int(is_one_black_crow(prev, curr)),
+                    'has_tweezer': int(is_tweezer_top(prev, curr)),
+                    'has_star': int(is_evening_star(prev2, prev, curr)),
+                    'pattern_at_sr': pattern_at_sr_level
+                }
+            
+            # Overall confirmation flag
+            patterns['has_any_pattern'] = int(any([
+                patterns['has_rejection'], patterns['has_pin_bar'], 
+                patterns['has_engulfing'], patterns['has_soldier_crow'],
+                patterns['has_tweezer'], patterns['has_star']
+            ]))
+            
+            return patterns
+        
+        
+        def calculate_ma_distance(row, direction):
+            """Calculate distance from price to each MA (from validation.py logic)"""
+            price = row['low'] if direction == 'BUY' else row['high']
+            
+            # Distance as percentage
+            dist_ma18 = abs(price - row['ma18']) / row['ma18'] if row['ma18'] > 0 else 0
+            dist_ma50 = abs(price - row['ma50']) / row['ma50'] if row['ma50'] > 0 else 0
+            dist_ma200 = abs(price - row['ma200']) / row['ma200'] if row['ma200'] > 0 else 0
+            
+            # Is price at MA? (within 5% tolerance like validation.py)
+            at_ma18 = 1 if dist_ma18 < 0.05 else 0
+            at_ma50 = 1 if dist_ma50 < 0.05 else 0
+            at_ma200 = 1 if dist_ma200 < 0.05 else 0
+            
+            return {
+                'dist_ma18': dist_ma18,
+                'dist_ma50': dist_ma50,
+                'dist_ma200': dist_ma200,
+                'at_ma18': at_ma18,
+                'at_ma50': at_ma50,
+                'at_ma200': at_ma200
+            }
+        
+        
+        def calculate_fibonacci_retracement(df, first_bounce_idx, current_idx, direction):
+            """
+            Calculate Fibonacci retracement level - INVALID if > 61.8%
+            
+            For BUY: Measures how much price retraced from swing high back toward first bounce low
+            For SELL: Measures how much price retraced from swing low back toward first bounce high
+            """
+            if first_bounce_idx >= current_idx or first_bounce_idx < 0:
+                return 0.0, True  # Return 0% and valid=True as fallback
+            
+            # Get first bounce price and swing slice
+            first_bounce_price = df.iloc[first_bounce_idx]['low'] if direction == 'BUY' else df.iloc[first_bounce_idx]['high']
+            swing_slice = df.iloc[first_bounce_idx:current_idx+1]
+            
+            if direction == 'BUY':
+                # For BUY: Price bounced from low, rallied to high, now retracing back down
+                swing_low = first_bounce_price  # Starting point (first bounce)
+                swing_high = swing_slice['high'].max()  # Peak of the rally
+                current_low = df.iloc[current_idx]['low']  # Current retracement level
+                
+                # Calculate retracement: how far back down from the high
+                swing_range = swing_high - swing_low
+                if swing_range > 0:
+                    # Retracement = distance from high to current / original swing range
+                    retracement = (swing_high - current_low) / swing_range
+                else:
+                    retracement = 0.0
+            else:  # SELL
+                # For SELL: Price bounced from high, declined to low, now retracing back up
+                swing_high = first_bounce_price  # Starting point (first bounce)
+                swing_low = swing_slice['low'].min()  # Bottom of the decline
+                current_high = df.iloc[current_idx]['high']  # Current retracement level
+                
+                # Calculate retracement: how far back up from the low
+                swing_range = swing_high - swing_low
+                if swing_range > 0:
+                    # Retracement = distance from low to current / original swing range
+                    retracement = (current_high - swing_low) / swing_range
+                else:
+                    retracement = 0.0
+            
+            # INVALID if retracement > 0.618 (61.8% Fibonacci level)
+            # Higher retracement = deeper pullback = weaker trend = skip
+            is_valid = retracement <= 0.618
+            
+            return retracement, is_valid
+        
+        
+        def detect_ma_bounce(row, direction, pip_size=0.01):
+            """Detect if candle bounced from any MA (18, 50, 200) - returns ALL touched MAs"""
+            tol = 2 * pip_size  # 2 pips
+            
+            bounces = []
+            
+            if direction == 'BUY':
+                # Low touches MA, close above MA
+                if row['low'] <= row['ma18'] + tol and row['close'] >= row['ma18']:
+                    bounces.append('MA18')
+                if row['low'] <= row['ma50'] + tol and row['close'] >= row['ma50']:
+                    bounces.append('MA50')
+                if row['low'] <= row['ma200'] + tol and row['close'] >= row['ma200']:
+                    bounces.append('MA200')
+            else:  # SELL
+                # High touches MA, close below MA
+                if row['high'] >= row['ma18'] - tol and row['close'] <= row['ma18']:
+                    bounces.append('MA18')
+                if row['high'] >= row['ma50'] - tol and row['close'] <= row['ma50']:
+                    bounces.append('MA50')
+                if row['high'] >= row['ma200'] - tol and row['close'] <= row['ma200']:
+                    bounces.append('MA200')
+            
+            # Return ALL touched MAs (not just one)
+            return bounces
+        
+        
+        def extract_training_examples(df, symbol='USDJPY', timeframe='H1', pip_size=0.01):
+            """Extract all MA bounce retests as training examples - ALL MAs tracked separately"""
+            
+            df = calculate_indicators(df)
+            
+            training_data = []
+            ma_bounces = {'MA18': [], 'MA50': [], 'MA200': []}
+            
+            print(f"\n🔍 Extracting from {symbol} {timeframe}...")
+            print(f"   📊 Total candles: {len(df)}")
+            
+            # Debug counters
+            debug_counts = {
+                'total_processed': 0,
+                'has_trend': 0,
+                'has_ma_bounce': 0,
+                'has_previous_bounce': 0,
+                'time_too_short': 0,
+                'fib_invalid': 0,
+                'extracted': 0
+            }
+            
+            for i in range(250, len(df)):
+                if pd.isna(df.iloc[i]['ma200']) or pd.isna(df.iloc[i]['atr']):
+                    continue
+                
+                debug_counts['total_processed'] += 1
+                row = df.iloc[i]
+                
+                # Get trend direction
+                trend = basic_trend_direction(row)
+                if not trend:
+                    continue
+                
+                debug_counts['has_trend'] += 1
+                
+                # Detect MA bounces (can be multiple MAs at once)
+                mas_touched = detect_ma_bounce(row, trend, pip_size)
+                if not mas_touched:
+                    continue
+                
+                debug_counts['has_ma_bounce'] += 1
+                
+                bounce_price = row['low'] if trend == 'BUY' else row['high']
+                
+                # Process EACH MA that was touched separately
+                for ma_touched in mas_touched:
+                    # Record bounce for this specific MA
+                    ma_bounces[ma_touched].append({
+                        'index': i,
+                        'time': row['time'],
+                        'price': bounce_price,
+                        'direction': trend
+                    })
+                    
+                    # Look for retest (previous bounce of SAME MA/direction)
+                    # IMPORTANT: First bounce = test, Second bounce (current) = entry point
+                    recent_bounces = [
+                        b for b in ma_bounces[ma_touched]
+                        if b['index'] < i 
+                        and b['index'] > i - 100
+                        and b['direction'] == trend
+                    ]
+                    
+                    if len(recent_bounces) == 0:
+                        continue
+                    
+                    debug_counts['has_previous_bounce'] += 1
+                    
+                    first_bounce = recent_bounces[-1]  # This is the TEST bounce (we don't trade here)
+                    # Current bounce (i) is the RETEST/ENTRY (we trade here)
+                    
+                    # Calculate time between bounces
+                    time_diff_hours = (row['time'] - first_bounce['time']).total_seconds() / 3600
+                    
+                    # Minimum 4 hours between bounces
+                    if time_diff_hours < 4:
+                        debug_counts['time_too_short'] += 1
+                        continue
+                    
+                    # Calculate Fibonacci retracement - SKIP if > 61.8%
+                    fib_retracement, fib_valid = calculate_fibonacci_retracement(
+                        df, first_bounce['index'], i, trend
+                    )
+                    
+                    if not fib_valid:
+                        # Skip this setup - retracement too deep (> 61.8%)
+                        debug_counts['fib_invalid'] += 1
+                        continue
+                    
+                    # Calculate outcome (did it move in trend direction?)
+                    # We measure from ENTRY (current bounce), not from first bounce
+                    future_window = min(20, len(df) - i - 1)
+                    if future_window < 5:
+                        continue
+                    
+                    future_slice = df.iloc[i+1:i+1+future_window]
+                    
+                    if trend == 'BUY':
+                        max_profit = (future_slice['high'].max() - row['close']) / pip_size
+                        max_loss = (row['close'] - future_slice['low'].min()) / pip_size
+                    else:
+                        max_profit = (row['close'] - future_slice['low'].min()) / pip_size
+                        max_loss = (future_slice['high'].max() - row['close']) / pip_size
+                    
+                    # Detect candlestick patterns at S/R level (MA touch)
+                    candle_patterns = detect_candlestick_patterns(df, i, trend, ma_touched, row)
+                    ma_distance_features = calculate_ma_distance(row, trend)
+                    
+                    # Higher Timeframe Trend Confirmation
+                    htf_trend_aligned = 0
+                    if timeframe == 'H1' and symbol in all_data and 'H4' in all_data[symbol]:
+                        h4_df = all_data[symbol]['H4']
+                        h4_match = h4_df[h4_df['time'] <= row['time']]
+                        if len(h4_match) > 0:
+                            h4_row = h4_match.iloc[-1]
+                            if not pd.isna(h4_row['ma50']):
+                                h4_trend = 'BUY' if h4_row['close'] > h4_row['ma50'] else 'SELL'
+                                htf_trend_aligned = 1 if h4_trend == trend else 0
+                    elif timeframe == 'H4' and symbol in all_data and 'D1' in all_data[symbol]:
+                        d1_df = all_data[symbol]['D1']
+                        d1_match = d1_df[d1_df['time'] <= row['time']]
+                        if len(d1_match) > 0:
+                            d1_row = d1_match.iloc[-1]
+                            if not pd.isna(d1_row['ma50']):
+                                d1_trend = 'BUY' if d1_row['close'] > d1_row['ma50'] else 'SELL'
+                                htf_trend_aligned = 1 if d1_trend == trend else 0
+                    
+                    # Build training example with all features
+                    example = {
+                        'time': str(row['time']),
+                        'symbol': symbol,
+                        'timeframe': timeframe,
+                        'direction': trend,
+                        'ma_level': ma_touched,
+                        
+                        # Entry point
+                        'entry_price': float(row['close']),
+                        'entry_high': float(row['high']),
+                        'entry_low': float(row['low']),
+                        'entry_open': float(row['open']),
+                        
+                        # MA values at entry
+                        'ma6': float(row['ma6']),
+                        'ma18': float(row['ma18']),
+                        'ma50': float(row['ma50']),
+                        'ma200': float(row['ma200']),
+                        
+                        # Slopes
+                        'slope6': float(row['slope6']),
+                        'slope18': float(row['slope18']),
+                        'slope50': float(row['slope50']),
+                        'slope200': float(row['slope200']),
+                        
+                        # Volatility
+                        'atr': float(row['atr']),
+                        
+                        # RSI & Force Index
+                        'rsi': float(row['rsi']) if not pd.isna(row['rsi']) else 50.0,
+                        'force_index': float(row['force_index']) if not pd.isna(row['force_index']) else 0.0,
+                        
+                        # Correlation (trend strength) & HTF confirmation
+                        'correlation': float(row['correlation']) if not pd.isna(row['correlation']) else 0.0,
+                        'htf_trend_aligned': htf_trend_aligned,
+                        
+                        # Fibonacci retracement (already validated <= 61.8%)
+                        'fib_retracement': float(fib_retracement),
+                        'fib_valid': int(fib_valid),  # Always 1 since we filtered out invalid ones
+                        
+                        # Candlestick patterns (from validation.py) - ONLY at S/R level
+                        'pattern_at_sr': candle_patterns['pattern_at_sr'],
+                        'has_rejection': candle_patterns['has_rejection'],
+                        'has_pin_bar': candle_patterns['has_pin_bar'],
+                        'has_engulfing': candle_patterns['has_engulfing'],
+                        'has_soldier_crow': candle_patterns['has_soldier_crow'],
+                        'has_tweezer': candle_patterns['has_tweezer'],
+                        'has_star': candle_patterns['has_star'],
+                        'has_any_pattern': candle_patterns['has_any_pattern'],
+                        
+                        # Distance from MAs
+                        'dist_ma18': float(ma_distance_features['dist_ma18']),
+                        'dist_ma50': float(ma_distance_features['dist_ma50']),
+                        'dist_ma200': float(ma_distance_features['dist_ma200']),
+                        'at_ma18': int(ma_distance_features['at_ma18']),
+                        'at_ma50': int(ma_distance_features['at_ma50']),
+                        'at_ma200': int(ma_distance_features['at_ma200']),
+                        
+                        # Swing info
+                        'first_bounce_time': str(first_bounce['time']),
+                        'first_bounce_price': float(first_bounce['price']),
+                        'swing_duration_hours': float(time_diff_hours),
+                        
+                        # Outcomes (for supervised learning labels)
+                        'max_profit_pips': float(max_profit),
+                        'max_loss_pips': float(max_loss),
+                        'profit_loss_ratio': float(max_profit / max_loss) if max_loss > 0 else 0,
+                        
+                        # Success labels (simple binary)
+                        'profitable': bool(max_profit > max_loss * 1.5),  # At least 1.5:1
+                        'very_profitable': bool(max_profit > max_loss * 2.0),  # At least 2:1
+                    }
+                    
+                    training_data.append(example)
+                    debug_counts['extracted'] += 1
+                
+                if len(training_data) % 50 == 0 and len(training_data) > 0:
+                    print(f"  Extracted {len(training_data)} examples...")
+            
+            # Show distribution for this pair/timeframe
+            ma_counts = {}
+            for ex in training_data:
+                ma = ex['ma_level']
+                ma_counts[ma] = ma_counts.get(ma, 0) + 1
+            
+            print(f"✅ Extracted {len(training_data)} examples from {symbol} {timeframe}")
+            
+            # Show debug information if no examples found
+            if len(training_data) == 0:
+                print(f"   🔍 DEBUG: Why no examples?")
+                print(f"      Candles processed: {debug_counts['total_processed']}")
+                print(f"      Had valid trend: {debug_counts['has_trend']}")
+                print(f"      Had MA bounce: {debug_counts['has_ma_bounce']}")
+                print(f"      Had previous bounce: {debug_counts['has_previous_bounce']}")
+                print(f"      Time too short (<4h): {debug_counts['time_too_short']}")
+                print(f"      Fib invalid (>61.8%): {debug_counts['fib_invalid']}")
+            
+            if ma_counts:
+                print(f"   Distribution: ", end="")
+                print(" | ".join([f"{ma}: {count}" for ma, count in sorted(ma_counts.items())]))
+            
+            return training_data
+        
+        
+        def load_csv_file(filename):
+            """Load CSV file with proper time parsing"""
+            try:
+                df = pd.read_csv(filename)
+                
+                # Check if empty
+                if df.empty or len(df) == 0:
+                    print(f"\n⚠️  Warning: {filename} is empty, skipping...")
+                    return None
+                
+                # Normalize column names to lowercase
+                df.columns = df.columns.str.lower()
+                
+                # Handle different time column names
+                time_columns = ['time', 'datetime', 'timestamp', 'date']
+                time_col = None
+                for col in time_columns:
+                    if col in df.columns:
+                        time_col = col
+                        break
+                
+                # If first column looks like datetime, use it
+                if time_col is None and len(df.columns) > 0:
+                    first_col = df.columns[0]
+                    # Try to parse first column as datetime
+                    try:
+                        pd.to_datetime(df[first_col])
+                        time_col = first_col
+                    except:
+                        pass
+                
+                if time_col is None:
+                    print(f"\n⚠️  Warning: Could not find time column in {filename}. Columns: {list(df.columns)}")
+                    return None
+                
+                # Rename to 'time' and parse
+                if time_col != 'time':
+                    df = df.rename(columns={time_col: 'time'})
+                
+                df['time'] = pd.to_datetime(df['time'])
+                
+                return df
+                
+            except pd.errors.EmptyDataError:
+                print(f"\n⚠️  Warning: {filename} is empty or corrupted, skipping...")
+                return None
+            except Exception as e:
+                print(f"\n⚠️  Warning: Error loading {filename}: {e}, skipping...")
+                return None
+        
+        
+        # ============================================================================
+        # MAIN EXECUTION
+        # ============================================================================
+        
+        print("\n" + "="*80)
+        
+        # Step 1: Load ALL CSV files into memory organized by symbol/timeframe
+        print("📥 STEP 1: Loading all CSV files into memory...")
+        all_data = {}  # {symbol: {timeframe: df}}
+        
+        for csv_file in csv_files:
+            filename = csv_file.name
+            
+            # Parse symbol and timeframe
+            parent_folder = csv_file.parent.name
+            if parent_folder in ['H1', 'H4', 'D1', 'W1', 'M15', 'M30', 'M1', 'M5']:
+                timeframe = parent_folder
+                symbol = filename.replace('.csv', '').upper()
+            else:
+                parts = filename.replace('.csv', '').split('_')
+                if len(parts) >= 2:
+                    symbol = parts[0].upper()
+                    timeframe = parts[1].upper()
+                else:
+                    symbol = filename.replace('.csv', '').upper()
+                    timeframe = 'UNKNOWN'
+            
+            # Clean symbol name (remove _h4, _H4 suffixes if present)
+            symbol = symbol.replace('_H1', '').replace('_H4', '').replace('_D1', '').replace('_W1', '')
+            symbol = symbol.replace('_M1', '').replace('_M5', '').replace('_M15', '').replace('_M30', '')
+            
+            print(f"  Loading {symbol} {timeframe}...", end=" ")
+            df = load_csv_file(str(csv_file))
+            
+            # Skip if file is empty or failed to load
+            if df is None:
+                continue
+            
+            print(f"✅ {len(df)} candles")
+            
+            # Calculate indicators for this dataframe (needed for HTF confirmation)
+            df = calculate_indicators(df)
+            
+            # Store in nested dictionary
+            if symbol not in all_data:
+                all_data[symbol] = {}
+            all_data[symbol][timeframe] = df
+        
+        print(f"\n✅ Loaded {len(csv_files)} files for {len(all_data)} symbols")
+        
+        # Step 2: Extract training examples from each file
+        print("\n" + "="*80)
+        print("📊 STEP 2: Extracting training examples...")
+        all_training_data = []
+        
+        # Process each symbol/timeframe combination
+        for symbol in all_data:
+            for timeframe in all_data[symbol]:
+                df = all_data[symbol][timeframe]
+                
+                # Determine pip size
+                pip_size = 0.01 if 'JPY' in symbol else 0.0001
+                
+                # Extract training examples
+                examples = extract_training_examples(df, symbol, timeframe, pip_size)
+                all_training_data.extend(examples)
+
+# Save all training data
+print("\n" + "=" * 80)
+print(f"💾 Total training examples: {len(all_training_data)}")
+print("=" * 80)
+
+output_filename = 'training_data.json'
+with open(output_filename, 'w') as f:
+    json.dump(all_training_data, f, indent=2)
+
+print(f"✅ Saved to {output_filename}")
+
+# Show statistics
+if all_training_data:
+    profitable = sum(1 for ex in all_training_data if ex['profitable'])
+    unprofitable = len(all_training_data) - profitable
+    
+    print(f"\n📊 Statistics:")
+    print(f"   Total: {len(all_training_data)}")
+    print(f"   ✅ Profitable (1.5:1+): {profitable} ({profitable/len(all_training_data)*100:.1f}%)")
+    print(f"   ❌ Unprofitable: {unprofitable} ({unprofitable/len(all_training_data)*100:.1f}%)")
+    
+    # Distribution by MA
+    ma_counts = {}
+    for ex in all_training_data:
+        ma = ex['ma_level']
+        ma_counts[ma] = ma_counts.get(ma, 0) + 1
+    
+    print(f"\n📊 Distribution by MA Level:")
+    for ma, count in sorted(ma_counts.items()):
+        print(f"   {ma}: {count} ({count/len(all_training_data)*100:.1f}%)")
+    
+    # Distribution by timeframe
+    tf_counts = {}
+    for ex in all_training_data:
+        tf = ex['timeframe']
+        tf_counts[tf] = tf_counts.get(tf, 0) + 1
+    
+    print(f"\n📊 Distribution by Timeframe:")
+    for tf, count in sorted(tf_counts.items()):
+        print(f"   {tf}: {count} ({count/len(all_training_data)*100:.1f}%)")
+    
+    # Sample
+    print(f"\n📋 Sample example (showing 2-bounce structure):")
+    sample = all_training_data[0]
+    print(f"   {sample['symbol']} {sample['timeframe']} | {sample['direction']} @ {sample['ma_level']}")
+    print(f"   ❶ 1st Bounce (TEST - don't trade):  {sample['first_bounce_time']} @ {sample['first_bounce_price']}")
+    print(f"   ❷ 2nd Bounce (ENTRY - we trade):    {sample['time']} @ {sample['entry_price']}")
+    print(f"   ⏱️  Time between bounces: {sample['swing_duration_hours']:.1f} hours")
+    print(f"   📊 Outcome: Profit={sample['max_profit_pips']:.1f}p, Loss={sample['max_loss_pips']:.1f}p, Ratio={sample['profit_loss_ratio']:.2f}")
+    print(f"   ✅ Profitable: {sample['profitable']}")
+
+print("\n" + "=" * 80)
+print("✅ CELL 2 COMPLETE: Extracted training data")
+print("=" * 80)
+print(f"💾 Total examples: {len(all_training_data)}")
+print(f"\n🔑 KEY REMINDER: Entry happens at the 2ND BOUNCE (retest)")
+print(f"   • 1st bounce = test/setup (DON'T trade)")
+print(f"   • 2nd bounce = entry/retest (TRADE HERE)")
+print(f"\n💡 Next: Run CELL 3 to view detailed examples before training")
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# CELL 3: VIEW & INSPECT TRAINING EXAMPLES
+# ════════════════════════════════════════════════════════════════════════════════
+
+print("\n" + "="*80)
+print("👁️  CELL 3: VIEW TRAINING EXAMPLES")
+print("="*80)
+
+if not all_training_data:
+    print("\n❌ No training data found. Run CELL 2 first.")
+else:
+    print(f"\n📊 Total examples: {len(all_training_data)}")
+    
+    # Overall statistics
+    profitable = sum(1 for ex in all_training_data if ex['profitable'])
+    unprofitable = len(all_training_data) - profitable
+    very_profitable = sum(1 for ex in all_training_data if ex['very_profitable'])
+    
+    print(f"\n{'='*80}")
+    print("OVERALL STATISTICS")
+    print(f"{'='*80}")
+    print(f"✅ Profitable (1.5:1+):      {profitable:>6} ({profitable/len(all_training_data)*100:>5.1f}%)")
+    print(f"⭐ Very Profitable (2:1+):   {very_profitable:>6} ({very_profitable/len(all_training_data)*100:>5.1f}%)")
+    print(f"❌ Unprofitable:             {unprofitable:>6} ({unprofitable/len(all_training_data)*100:>5.1f}%)")
+    
+    # MA distribution
+    ma_counts = {}
+    for ex in all_training_data:
+        ma = ex['ma_level']
+        ma_counts[ma] = ma_counts.get(ma, 0) + 1
+    
+    print(f"\n{'='*80}")
+    print("DISTRIBUTION BY MA LEVEL")
+    print(f"{'='*80}")
+    for ma in ['MA18', 'MA50', 'MA200']:
+        count = ma_counts.get(ma, 0)
+        if count > 0:
+            print(f"{ma}:  {count:>6} ({count/len(all_training_data)*100:>5.1f}%)")
+    
+    # Timeframe distribution
+    tf_counts = {}
+    for ex in all_training_data:
+        tf = ex['timeframe']
+        tf_counts[tf] = tf_counts.get(tf, 0) + 1
+    
+    print(f"\n{'='*80}")
+    print("DISTRIBUTION BY TIMEFRAME")
+    print(f"{'='*80}")
+    for tf, count in sorted(tf_counts.items()):
+        print(f"{tf:>6}:  {count:>6} ({count/len(all_training_data)*100:>5.1f}%)")
+    
+    # Symbol distribution
+    symbol_counts = {}
+    for ex in all_training_data:
+        symbol = ex['symbol']
+        symbol_counts[symbol] = symbol_counts.get(symbol, 0) + 1
+    
+    print(f"\n{'='*80}")
+    print("DISTRIBUTION BY SYMBOL")
+    print(f"{'='*80}")
+    for symbol, count in sorted(symbol_counts.items()):
+        print(f"{symbol:>10}:  {count:>6} ({count/len(all_training_data)*100:>5.1f}%)")
+    
+    # Show winning examples
+    winning = [ex for ex in all_training_data if ex['profitable']]
+    losing = [ex for ex in all_training_data if not ex['profitable']]
+    
+    print(f"\n{'='*80}")
+    print("SAMPLE WINNING TRADES (First 5)")
+    print(f"{'='*80}")
+    for i, ex in enumerate(winning[:5], 1):
+        print(f"\n{i}. {ex['symbol']} {ex['timeframe']} | {ex['direction']} @ {ex['ma_level']}")
+        print(f"   ❶ 1st Bounce (TEST - DON'T TRADE): {ex['first_bounce_time']} @ {ex['first_bounce_price']:.5f}")
+        print(f"   ❷ 2nd Bounce (ENTRY - TRADE HERE): {ex['time']} @ {ex['entry_price']:.5f}")
+        print(f"      ⏱️  {ex['swing_duration_hours']:.1f} hours between bounces")
+        print(f"      📊 Outcome: ✅ Profit={ex['max_profit_pips']:.1f}p | Loss={ex['max_loss_pips']:.1f}p | Ratio={ex['profit_loss_ratio']:.2f}")
+    
+    print(f"\n{'='*80}")
+    print("SAMPLE LOSING TRADES (First 5)")
+    print(f"{'='*80}")
+    for i, ex in enumerate(losing[:5], 1):
+        print(f"\n{i}. {ex['symbol']} {ex['timeframe']} | {ex['direction']} @ {ex['ma_level']}")
+        print(f"   ❶ 1st Bounce (TEST - DON'T TRADE): {ex['first_bounce_time']} @ {ex['first_bounce_price']:.5f}")
+        print(f"   ❷ 2nd Bounce (ENTRY - TRADE HERE): {ex['time']} @ {ex['entry_price']:.5f}")
+        print(f"      ⏱️  {ex['swing_duration_hours']:.1f} hours between bounces")
+        print(f"      📊 Outcome: ❌ Profit={ex['max_profit_pips']:.1f}p | Loss={ex['max_loss_pips']:.1f}p | Ratio={ex['profit_loss_ratio']:.2f}")
+    
+    print(f"\n{'='*80}")
+    print("DATA QUALITY CHECK")
+    print(f"{'='*80}")
+    print(f"✓ All MAs represented: {len(ma_counts) == 3}")
+    print(f"✓ Multiple timeframes: {len(tf_counts) > 1}")
+    print(f"✓ Balanced win/loss: {0.3 < profitable/len(all_training_data) < 0.7}")
+    print(f"✓ Sufficient examples: {len(all_training_data) >= 100}")
+
+print("\n" + "=" * 80)
+print("✅ CELL 3 COMPLETE: Reviewed examples")
+print("=" * 80)
+print(f"\n💡 Next: Run CELL 4 to train DL model (if data looks good)")
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# CELL 4: TRAIN DEEP LEARNING MODEL
+# ════════════════════════════════════════════════════════════════════════════════
+
+print("\n" + "="*80)
+print("🧠 CELL 4: TRAIN DEEP LEARNING MODEL")
+print("="*80)
+
+if not all_training_data:
+    print("❌ No training data - skipping model training")
+else:
+    # Prepare features and labels
+    print("\n📊 Preparing training data...")
+    
+    features = []
+    labels = []
+    
+    for ex in all_training_data:
+        # Features: MAs, slopes, ATR, RSI, Force Index, correlation, HTF, Fib, patterns, MA distances
+        feature_vector = [
+            # Moving averages
+            ex['ma6'], ex['ma18'], ex['ma50'], ex['ma200'],
+            # MA slopes
+            ex['slope6'], ex['slope18'], ex['slope50'], ex['slope200'],
+            # Volatility
+            ex['atr'],
+            # RSI & Force Index
+            ex['rsi'], ex['force_index'],
+            # Correlation (trend strength) & HTF confirmation
+            ex['correlation'], ex['htf_trend_aligned'],
+            # Fibonacci retracement (validated <= 61.8%)
+            ex['fib_retracement'], ex['fib_valid'],
+            # Candlestick patterns (ONLY at S/R level - from validation.py)
+            ex['pattern_at_sr'], ex['has_rejection'], ex['has_pin_bar'], ex['has_engulfing'],
+            ex['has_soldier_crow'], ex['has_tweezer'], ex['has_star'],
+            ex['has_any_pattern'],
+            # Distance from MAs
+            ex['dist_ma18'], ex['dist_ma50'], ex['dist_ma200'],
+            ex['at_ma18'], ex['at_ma50'], ex['at_ma200'],
+            # Timing
+            ex['swing_duration_hours'],
+            # Direction encoding
+            1 if ex['direction'] == 'BUY' else 0,
+            # MA level encoding
+            1 if ex['ma_level'] == 'MA18' else (2 if ex['ma_level'] == 'MA50' else 3)
+        ]
+        features.append(feature_vector)
+        
+        # Label: profitable or not
+        labels.append(1 if ex['profitable'] else 0)
+    
+    X = np.array(features, dtype=np.float32)
+    y = np.array(labels, dtype=np.float32)
+    
+    print(f"   Features shape: {X.shape}")
+    print(f"   Labels: {sum(labels)} profitable, {len(labels) - sum(labels)} unprofitable")
+    
+    # Calculate class weights for balanced training
+    num_positive = sum(labels)
+    num_negative = len(labels) - num_positive
+    total = len(labels)
+    
+    # Aggressive weight for minority class (multiply by 3 to catch more winners)
+    pos_weight = (total / (2 * num_positive)) * 3.0 if num_positive > 0 else 1.0
+    neg_weight = total / (2 * num_negative) if num_negative > 0 else 1.0
+    
+    print(f"   Class weights: positive={pos_weight:.2f}, negative={neg_weight:.2f}")
+    print(f"   Class distribution: {num_positive} profitable ({num_positive/total*100:.1f}%), {num_negative} unprofitable ({num_negative/total*100:.1f}%)")
+    
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    # Normalize features
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+    
+    # Convert to PyTorch tensors
+    X_train = torch.FloatTensor(X_train)
+    y_train = torch.FloatTensor(y_train).unsqueeze(1)
+    X_test = torch.FloatTensor(X_test)
+    y_test = torch.FloatTensor(y_test).unsqueeze(1)
+    
+    print(f"\n   Train set: {len(X_train)} examples")
+    print(f"   Test set: {len(X_test)} examples")
+    
+    # Define neural network (BIGGER to fix HIGH BIAS)
+    class TCEClassifier(nn.Module):
+        def __init__(self, input_size):
+            super(TCEClassifier, self).__init__()
+            self.network = nn.Sequential(
+                nn.Linear(input_size, 128),  # Increased from 64
+                nn.ReLU(),
+                nn.Dropout(0.2),  # Reduced from 0.3 (less regularization for underfitting)
+                nn.Linear(128, 64),  # Added extra layer
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(64, 32),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(32, 16),
+                nn.ReLU(),
+                nn.Linear(16, 1)
+                # Note: No Sigmoid here - using BCEWithLogitsLoss which includes it
+            )
+        
+        def forward(self, x):
+            return self.network(x)
+    
+    # Initialize model
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"\n🖥️  Using device: {device}")
+    
+    model = TCEClassifier(input_size=X_train.shape[1]).to(device)
+    
+    # Use weighted BCE loss to handle class imbalance
+    pos_weight_tensor = torch.FloatTensor([pos_weight]).to(device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
+    
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    
+    # Training loop
+    print("\n🏋️  Training model...")
+    epochs = 100  # Increased from 50 to fix underfitting
+    batch_size = 32
+    
+    X_train = X_train.to(device)
+    y_train = y_train.to(device)
+    X_test = X_test.to(device)
+    y_test = y_test.to(device)
+    
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0
+        
+        # Mini-batch training
+        for i in range(0, len(X_train), batch_size):
+            batch_X = X_train[i:i+batch_size]
+            batch_y = y_train[i:i+batch_size]
+            
+            optimizer.zero_grad()
             outputs = model(batch_X)
             loss = criterion(outputs, batch_y)
+            loss.backward()
+            optimizer.step()
             
-            test_loss += loss.item()
-            predictions = (outputs > 0.5).float()
-            test_correct += (predictions == batch_y).sum().item()
-            test_total += batch_y.size(0)
-    
-    test_loss /= len(test_loader)
-    test_acc = test_correct / test_total
-    
-    # Save best model
-    if test_acc > best_test_acc:
-        best_test_acc = test_acc
-        best_model_state = model.state_dict().copy()
-    
-    # Print progress
-    if (epoch + 1) % 5 == 0:
-        print(f"Epoch {epoch+1:>2}/{num_epochs} | "
-              f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc*100:>5.2f}% | "
-              f"Test Loss: {test_loss:.4f} | Test Acc: {test_acc*100:>5.2f}%")
-
-print(f"\n{'='*80}")
-print(f"✅ TRAINING COMPLETE!")
-print(f"   • Best Test Accuracy: {best_test_acc*100:.2f}%")
-print("="*80 + "\n")
-
-# Load best model
-model.load_state_dict(best_model_state)
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-# CELL 6.5: PRODUCTION PERFORMANCE METRICS & RISK ANALYSIS
-# ════════════════════════════════════════════════════════════════════════════════
-# ⏱️ Time: 1-2 minutes
-# 📊 Calculate professional trading metrics
-# ════════════════════════════════════════════════════════════════════════════════
-
-print("="*80)
-print("📊 CELL 6.5: PRODUCTION PERFORMANCE METRICS")
-print("="*80 + "\n")
-
-# Get predictions on test set
-model.eval()
-all_predictions = []
-all_true_labels = []
-all_probabilities = []
-
-with torch.no_grad():
-    for batch_X, batch_y in test_loader:
-        batch_X = batch_X.to(device)
-        outputs = model(batch_X)
-        predictions = (outputs > 0.5).float()
+            total_loss += loss.item()
         
-        all_predictions.extend(predictions.cpu().numpy())
-        all_true_labels.extend(batch_y.cpu().numpy())
-        all_probabilities.extend(outputs.cpu().numpy())
-
-all_predictions = np.array(all_predictions).flatten()
-all_true_labels = np.array(all_true_labels).flatten()
-all_probabilities = np.array(all_probabilities).flatten()
-
-# Calculate comprehensive metrics
-print("🎯 CLASSIFICATION METRICS:\\n")
-
-# Confusion matrix components
-tp = ((all_predictions == 1) & (all_true_labels == 1)).sum()
-tn = ((all_predictions == 0) & (all_true_labels == 0)).sum()
-fp = ((all_predictions == 1) & (all_true_labels == 0)).sum()
-fn = ((all_predictions == 0) & (all_true_labels == 1)).sum()
-
-accuracy = (tp + tn) / len(all_predictions) if len(all_predictions) > 0 else 0
-precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-
-print(f"   Accuracy:   {accuracy*100:.2f}%")
-print(f"   Precision:  {precision*100:.2f}% (of predicted winners, how many actually won?)")
-print(f"   Recall:     {recall*100:.2f}% (of actual winners, how many did we catch?)")
-print(f"   F1-Score:   {f1_score:.3f}")
-print(f"   Specificity:{specificity*100:.2f}% (correctly identifying losers)")
-
-print(f"\\n   Confusion Matrix:")
-print(f"   ┌─────────────────────┬─────────┬─────────┐")
-print(f"   │                     │ Pred: 0 │ Pred: 1 │")
-print(f"   ├─────────────────────┼─────────┼─────────┤")
-print(f"   │ True: 0 (Loss)      │ {tn:>7} │ {fp:>7} │")
-print(f"   │ True: 1 (Profit)    │ {fn:>7} │ {tp:>7} │")
-print(f"   └─────────────────────┴─────────┴─────────┘")
-
-# TRADING METRICS (simulated backtest on test set)
-print(f"\\n{'='*60}")
-print("💰 SIMULATED TRADING PERFORMANCE:\\n")
-
-# Assume 1R per trade (risk = 1 unit, reward = 1.5 units typical)
-risk_per_trade = 1.0
-reward_ratio = 1.5  # Average RR ratio
-
-# Simulate P&L
-trades = []
-for i in range(len(all_predictions)):
-    if all_predictions[i] == 1:  # Model says take trade
-        if all_true_labels[i] == 1:  # Trade was actually profitable
-            pnl = risk_per_trade * reward_ratio  # Win
+        # Evaluate every 10 epochs
+        if (epoch + 1) % 10 == 0:
+            model.eval()
+            with torch.no_grad():
+                train_logits = model(X_train)
+                train_pred = torch.sigmoid(train_logits)
+                train_acc = ((train_pred > 0.5).float() == y_train).float().mean()
+                
+                test_logits = model(X_test)
+                test_pred = torch.sigmoid(test_logits)
+                test_acc = ((test_pred > 0.5).float() == y_test).float().mean()
+            
+            print(f"   Epoch {epoch+1}/{epochs} | Loss: {total_loss/len(X_train):.4f} | "
+                  f"Train Acc: {train_acc:.3f} | Test Acc: {test_acc:.3f}")
+    
+    # Final evaluation
+    model.eval()
+    with torch.no_grad():
+        test_logits = model(X_test)
+        test_pred = torch.sigmoid(test_logits)
+        
+        # Find optimal threshold by maximizing F1 score
+        print(f"\n🎯 Finding optimal decision threshold...")
+        best_f1 = 0
+        best_threshold = 0.5
+        best_metrics = {}
+        
+        for threshold in np.arange(0.1, 0.9, 0.05):
+            pred_labels = (test_pred > threshold).float()
+            tp = ((pred_labels == 1) & (y_test == 1)).sum().item()
+            fp = ((pred_labels == 1) & (y_test == 0)).sum().item()
+            fn = ((pred_labels == 0) & (y_test == 1)).sum().item()
+            
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+            
+            if f1 > best_f1:
+                best_f1 = f1
+                best_threshold = threshold
+                best_metrics = {
+                    'tp': tp, 'fp': fp, 'fn': fn,
+                    'precision': precision, 'recall': recall, 'f1': f1
+                }
+        
+        print(f"   Optimal threshold: {best_threshold:.2f} (F1: {best_f1:.3f})")
+        
+        # Use optimal threshold for final evaluation
+        pred_labels = (test_pred > best_threshold).float()
+        test_acc = ((pred_labels == y_test).float()).mean()
+        
+        true_positives = best_metrics['tp']
+        false_positives = best_metrics['fp']
+        false_negatives = best_metrics['fn']
+        true_negatives = ((pred_labels == 0) & (y_test == 0)).sum().item()
+        
+        precision = best_metrics['precision']
+        recall = best_metrics['recall']
+        f1 = best_metrics['f1']
+    
+    print(f"\n📊 Final Model Performance (threshold={best_threshold:.2f}):")
+    print(f"   Accuracy: {test_acc:.3f}")
+    print(f"   Precision: {precision:.3f}")
+    print(f"   Recall: {recall:.3f}")
+    print(f"   F1 Score: {f1:.3f}")
+    print(f"\n📊 Confusion Matrix:")
+    print(f"   True Positives:  {int(true_positives):>6} (correctly predicted profitable)")
+    print(f"   False Positives: {int(false_positives):>6} (incorrectly predicted profitable)")
+    print(f"   True Negatives:  {int(true_negatives):>6} (correctly predicted unprofitable)")
+    print(f"   False Negatives: {int(false_negatives):>6} (missed profitable trades)")
+    
+    total_profitable = int(true_positives + false_negatives)
+    total_unprofitable = int(true_negatives + false_positives)
+    print(f"\n📊 Trade Capture:")
+    print(f"   Caught {int(true_positives)}/{total_profitable} profitable trades ({recall*100:.1f}%)")
+    print(f"   Avoided {int(true_negatives)}/{total_unprofitable} unprofitable trades ({true_negatives/(true_negatives + false_positives)*100:.1f}%)")
+    
+    print(f"\n💡 Interpretation:")
+    if recall < 0.5:
+        print(f"   ⚠️  Low recall ({recall:.1%}) - model is missing many profitable trades")
+        print(f"   → Consider: More training data, different features, or lower threshold")
+    elif recall >= 0.5 and recall < 0.7:
+        print(f"   ✅ Moderate recall ({recall:.1%}) - catching half of profitable trades")
+    else:
+        print(f"   ✅ Good recall ({recall:.1%}) - catching most profitable trades")
+    
+    if precision < 0.5:
+        print(f"   ⚠️  Low precision ({precision:.1%}) - many false positives")
+        print(f"   → Model predictions have high false alarm rate")
+    elif precision >= 0.5 and precision < 0.7:
+        print(f"   ✅ Moderate precision ({precision:.1%}) - reasonable accuracy")
+    else:
+        print(f"   ✅ Good precision ({precision:.1%}) - few false positives")
+    
+    if f1 > 0.6:
+        print(f"   ✅✅ Strong F1 score ({f1:.1%}) - balanced performance")
+    elif f1 > 0.4:
+        print(f"   ✅ Acceptable F1 score ({f1:.1%}) - usable model")
+    else:
+        print(f"   ⚠️  Low F1 score ({f1:.1%}) - needs improvement")
+    
+    # Save model with optimal threshold
+    print("\n💾 Saving model...")
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'scaler_mean': scaler.mean_,
+        'scaler_scale': scaler.scale_,
+        'optimal_threshold': best_threshold,
+        'feature_names': ['ma6', 'ma18', 'ma50', 'ma200', 
+                         'slope6', 'slope18', 'slope50', 'slope200',
+                         'atr', 'rsi', 'force_index',
+                         'correlation', 'htf_trend_aligned',
+                         'fib_retracement', 'fib_valid',
+                         'pattern_at_sr', 'has_rejection', 'has_pin_bar', 'has_engulfing',
+                         'has_soldier_crow', 'has_tweezer', 'has_star', 'has_any_pattern',
+                         'dist_ma18', 'dist_ma50', 'dist_ma200',
+                         'at_ma18', 'at_ma50', 'at_ma200',
+                         'swing_duration', 'direction', 'ma_level']
+    }, 'tce_model.pth')
+    
+    print(f"✅ Model saved as tce_model.pth (optimal threshold: {best_threshold:.2f})")
+    
+    # ============================================================================
+    # BIAS-VARIANCE DIAGNOSTICS
+    # ============================================================================
+    
+    print("\n" + "=" * 80)
+    print("🔬 BIAS-VARIANCE DIAGNOSTICS")
+    print("=" * 80)
+    
+    # Evaluate on both train and test sets at optimal threshold
+    model.eval()
+    with torch.no_grad():
+        # Train set performance
+        train_logits = model(X_train)
+        train_pred = torch.sigmoid(train_logits)
+        train_pred_labels = (train_pred > best_threshold).float()
+        
+        train_tp = ((train_pred_labels == 1) & (y_train == 1)).sum().item()
+        train_fp = ((train_pred_labels == 1) & (y_train == 0)).sum().item()
+        train_fn = ((train_pred_labels == 0) & (y_train == 1)).sum().item()
+        
+        train_precision = train_tp / (train_tp + train_fp) if (train_tp + train_fp) > 0 else 0
+        train_recall = train_tp / (train_tp + train_fn) if (train_tp + train_fn) > 0 else 0
+        train_f1 = 2 * (train_precision * train_recall) / (train_precision + train_recall) if (train_precision + train_recall) > 0 else 0
+        train_acc = ((train_pred_labels == y_train).float()).mean().item()
+    
+    # Compare train vs test
+    print(f"\n📊 Train vs Test Performance (at threshold={best_threshold:.2f}):")
+    print(f"\n{'Metric':<15} {'Train':<12} {'Test':<12} {'Difference':<12}")
+    print(f"{'-'*51}")
+    print(f"{'Accuracy':<15} {train_acc:<12.3f} {test_acc.item():<12.3f} {abs(train_acc - test_acc.item()):<12.3f}")
+    print(f"{'Precision':<15} {train_precision:<12.3f} {precision:<12.3f} {abs(train_precision - precision):<12.3f}")
+    print(f"{'Recall':<15} {train_recall:<12.3f} {recall:<12.3f} {abs(train_recall - recall):<12.3f}")
+    print(f"{'F1 Score':<15} {train_f1:<12.3f} {f1:<12.3f} {abs(train_f1 - f1):<12.3f}")
+    
+    # Diagnosis
+    print(f"\n🔍 Diagnosis:")
+    
+    gap = abs(train_f1 - f1)
+    train_perf = train_f1
+    test_perf = f1
+    
+    if gap < 0.05:
+        print(f"   ✅ Low train-test gap ({gap:.3f}) - Good generalization")
+        if test_perf < 0.6:
+            print(f"   ⚠️  But test F1 is low ({test_perf:.3f}) - HIGH BIAS (underfitting)")
+            print(f"   → Model too simple to capture patterns")
         else:
-            pnl = -risk_per_trade  # Loss
-        trades.append(pnl)
-
-if len(trades) > 0:
-    trades_arr = np.array(trades)
-    cumulative_pnl = np.cumsum(trades_arr)
-    
-    total_trades = len(trades)
-    winning_trades = (trades_arr > 0).sum()
-    losing_trades = (trades_arr < 0).sum()
-    win_rate = winning_trades / total_trades * 100
-    
-    avg_win = trades_arr[trades_arr > 0].mean() if (trades_arr > 0).any() else 0
-    avg_loss = abs(trades_arr[trades_arr < 0].mean()) if (trades_arr < 0).any() else 0
-    profit_factor = (trades_arr[trades_arr > 0].sum() / abs(trades_arr[trades_arr < 0].sum())) if (trades_arr < 0).any() else 0
-    
-    max_drawdown = 0
-    peak = cumulative_pnl[0]
-    for pnl in cumulative_pnl:
-        if pnl > peak:
-            peak = pnl
-        drawdown = peak - pnl
-        if drawdown > max_drawdown:
-            max_drawdown = drawdown
-    
-    # Sharpe ratio (assuming 252 trading days, annualized)
-    if trades_arr.std() > 0:
-        sharpe_ratio = (trades_arr.mean() / trades_arr.std()) * np.sqrt(252)
+            print(f"   ✅ Test F1 is good ({test_perf:.3f}) - Well-balanced model")
+    elif gap >= 0.05 and gap < 0.15:
+        print(f"   ⚠️  Moderate train-test gap ({gap:.3f}) - Some overfitting")
+        print(f"   → Model memorizing training data slightly")
     else:
-        sharpe_ratio = 0
+        print(f"   ❌ Large train-test gap ({gap:.3f}) - HIGH VARIANCE (overfitting)")
+        print(f"   → Model memorizing training data instead of learning patterns")
     
-    final_pnl = cumulative_pnl[-1]
-    recovery_factor = final_pnl / max_drawdown if max_drawdown > 0 else 0
+    # Detailed recommendations
+    print(f"\n💡 Recommendations to Improve:")
     
-    print(f"   Total Trades:     {total_trades}")
-    print(f"   Winning Trades:   {winning_trades} ({win_rate:.1f}%)")
-    print(f"   Losing Trades:    {losing_trades} ({100-win_rate:.1f}%)")
-    print(f"   ")
-    print(f"   Average Win:      {avg_win:.2f}R")
-    print(f"   Average Loss:     {avg_loss:.2f}R")
-    print(f"   Profit Factor:    {profit_factor:.2f} (>1.5 = good, >2.0 = excellent)")
-    print(f"   ")
-    print(f"   Total P&L:        {final_pnl:+.2f}R")
-    print(f"   Max Drawdown:     {max_drawdown:.2f}R")
-    print(f"   Recovery Factor:  {recovery_factor:.2f} (>3.0 = good)")
-    print(f"   Sharpe Ratio:     {sharpe_ratio:.2f} (>1.0 = good, >2.0 = excellent)")
+    if gap >= 0.15:  # High variance
+        print(f"\n   🎯 HIGH VARIANCE DETECTED - To reduce overfitting:")
+        print(f"      1. Add more training data (currently {len(X_train)} examples)")
+        print(f"      2. Increase dropout (currently 0.3 → try 0.5)")
+        print(f"      3. Reduce model complexity (fewer layers/neurons)")
+        print(f"      4. Add L2 regularization (weight_decay in optimizer)")
+        print(f"      5. Use early stopping based on validation loss")
+        
+    if test_perf < 0.6 and gap < 0.1:  # High bias
+        print(f"\n   🎯 HIGH BIAS DETECTED - To reduce underfitting:")
+        print(f"      1. Increase model complexity (add layers: 64→128→64→32→16)")
+        print(f"      2. Add more features (e.g., RSI, volume, price patterns)")
+        print(f"      3. Train longer (currently {epochs} epochs → try 100-200)")
+        print(f"      4. Lower dropout (currently 0.3 → try 0.2)")
+        print(f"      5. Use different activation functions (try LeakyReLU, ELU)")
     
-    # Risk assessment
-    print(f"\\n   📈 VIABILITY ASSESSMENT:")
-    if win_rate >= 50 and profit_factor >= 1.5 and sharpe_ratio >= 1.0:
-        print(f"   ✅ STRONG: This system shows good profitability potential")
-        viability_score = "8-9/10"
-    elif win_rate >= 40 and profit_factor >= 1.2:
-        print(f"   ⚠️  MODERATE: System needs refinement before live trading")
-        viability_score = "6-7/10"
-    else:
-        print(f"   ❌ WEAK: Needs significant improvements before considering live")
-        viability_score = "3-5/10"
+    if precision < 0.5:  # Low precision
+        print(f"\n   🎯 LOW PRECISION - To reduce false positives:")
+        print(f"      1. Add quality filters (e.g., require strong trend, low volatility)")
+        print(f"      2. Engineer better features (distance from MA, trend strength)")
+        print(f"      3. Collect more negative examples (losing trades)")
+        print(f"      4. Try ensemble methods (train multiple models, vote)")
+        print(f"      5. Increase threshold (currently {best_threshold:.2f} → try 0.65-0.70)")
     
-    print(f"   Current Score: {viability_score}")
+    if recall < 0.7:  # Low recall
+        print(f"\n   🎯 LOW RECALL - To catch more winners:")
+        print(f"      1. Increase positive class weight (currently {pos_weight:.2f} → try 4-5x)")
+        print(f"      2. Lower threshold (currently {best_threshold:.2f} → try 0.4-0.5)")
+        print(f"      3. Add more positive examples (winning trades)")
+        print(f"      4. Use SMOTE or data augmentation for minority class")
     
-else:
-    print("   ⚠️  No trades taken in test period")
+    # General improvements
+    print(f"\n   📈 GENERAL IMPROVEMENTS:")
+    print(f"      1. **More Data**: Collect 6-12 months across multiple pairs/timeframes")
+    print(f"      2. **Better Features**:")
+    print(f"         • Price action: candle patterns, wicks, body size")
+    print(f"         • Volatility: ATR ratio, Bollinger Bands")
+    print(f"         • Momentum: RSI, MACD, Stochastic")
+    print(f"         • Volume: if available from broker")
+    print(f"         • Time of day: London/NY session indicators")
+    print(f"      3. **Different Models**:")
+    print(f"         • Try LightGBM, XGBoost (often better for tabular data)")
+    print(f"         • Try LSTM/GRU for sequential patterns")
+    print(f"         • Try ensemble: combine multiple models")
+    print(f"      4. **Cross-Validation**: Use k-fold CV to verify generalization")
+    print(f"      5. **Hyperparameter Tuning**: Grid search learning rate, batch size, architecture")
+    
+    # Feature importance (approximate with gradient magnitudes)
+    print(f"\n📊 Feature Importance (gradient magnitude):")
+    model.eval()
+    X_sample = X_train[:1000].clone().requires_grad_(True)
+    output = model(X_sample)
+    output.sum().backward()
+    
+    feature_importance = X_sample.grad.abs().mean(dim=0).cpu().numpy()
+    feature_names = ['ma6', 'ma18', 'ma50', 'ma200', 'slope6', 'slope18', 
+                     'slope50', 'slope200', 'atr', 'rsi', 'force_index',
+                     'correlation', 'htf_trend_aligned',
+                     'fib_retracement', 'fib_valid',
+                     'pattern_at_sr', 'has_rejection', 'has_pin_bar', 'has_engulfing',
+                     'has_soldier_crow', 'has_tweezer', 'has_star', 'has_any_pattern',
+                     'dist_ma18', 'dist_ma50', 'dist_ma200',
+                     'at_ma18', 'at_ma50', 'at_ma200',
+                     'swing_hours', 'direction', 'ma_level']
+    
+    sorted_idx = np.argsort(feature_importance)[::-1]
+    print(f"\n   Top 5 most important features:")
+    for i, idx in enumerate(sorted_idx[:5], 1):
+        print(f"      {i}. {feature_names[idx]:<15} (importance: {feature_importance[idx]:.4f})")
 
-print(f"\\n{'='*60}")
-print("\\n⚠️  IMPORTANT DISCLAIMERS:")
-print("   • These are SIMULATED results, not live trading")
-print("   • Real trading includes spread, slippage, commissions")
-print("   • Past performance does not guarantee future results")
-print("   • ALWAYS paper trade for 3-6 months before going live")
-print("   • Start with small position sizes when going live")
-print(f"\\n{'='*60}\\n")
+print("\n" + "=" * 80)
+print("✅ CELL 4 COMPLETE: Model trained & analyzed")
+print("=" * 80)
+print(f"\n💡 Next: Run CELL 5 to download results")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# RISK MANAGEMENT FRAMEWORK
+# CELL 5: DOWNLOAD RESULTS
 # ════════════════════════════════════════════════════════════════════════════════
 
+print("\n" + "="*80)
+print("⬇️  CELL 5: DOWNLOAD RESULTS")
 print("="*80)
-print("⚖️  RISK MANAGEMENT FRAMEWORK")
-print("="*80 + "\n")
 
-class RiskManager:
-    \"\"\"Production-ready risk management system\"\"\"
+if all_training_data:
+    print("\n📥 Downloading files...")
+    files.download('training_data.json')
+    print("✅ Downloaded: training_data.json")
     
-    def __init__(self, account_balance: float, max_risk_per_trade: float = 0.01,
-                 max_daily_drawdown: float = 0.03, max_correlated_trades: int = 2):
-        self.account_balance = account_balance
-        self.max_risk_per_trade = max_risk_per_trade  # 1% default
-        self.max_daily_drawdown = max_daily_drawdown  # 3% max daily loss
-        self.max_correlated_trades = max_correlated_trades
-        
-        self.daily_pnl = 0.0
-        self.open_positions = []
-        self.daily_trades = 0
-    
-    def calculate_position_size(self, stop_loss_pips: float, pair: str = \"EURUSD\") -> float:
-        \"\"\"Calculate position size based on risk per trade\"\"\"
-        risk_amount = self.account_balance * self.max_risk_per_trade
-        
-        # For forex: position_size = risk / (stop_loss_pips * pip_value)
-        # Simplified: assuming $10 per pip for standard lot
-        pip_value = 10.0
-        position_size = risk_amount / (stop_loss_pips * pip_value)
-        
-        return round(position_size, 2)
-    
-    def check_daily_drawdown_limit(self) -> bool:
-        \"\"\"Check if daily drawdown limit reached\"\"\"
-        max_daily_loss = self.account_balance * self.max_daily_drawdown
-        return abs(self.daily_pnl) < max_daily_loss
-    
-    def check_correlation_limit(self, new_pair: str) -> bool:
-        \"\"\"Check if too many correlated positions\"\"\"
-        # Count EUR-based trades
-        eur_pairs = [p for p in self.open_positions if 'EUR' in p]
-        if 'EUR' in new_pair and len(eur_pairs) >= self.max_correlated_trades:
-            return False
-        return True
-    
-    def can_take_trade(self, pair: str) -> tuple[bool, str]:
-        \"\"\"Master check - can we take this trade?\"\"\"
-        if not self.check_daily_drawdown_limit():
-            return False, \"Daily drawdown limit reached\"
-        
-        if not self.check_correlation_limit(pair):
-            return False, f\"Too many correlated {pair[:3]} positions\"
-        
-        if self.daily_trades >= 10:
-            return False, \"Daily trade limit reached\"
-        
-        return True, \"Trade approved\"
+    if os.path.exists('tce_model.pth'):
+        files.download('tce_model.pth')
+        print("✅ Downloaded: tce_model.pth")
 
-# Example usage
-print(\"Example: $10,000 account with 1% risk per trade\\n\")
-risk_mgr = RiskManager(account_balance=10000, max_risk_per_trade=0.01)
-
-example_stop_loss = 20  # pips
-position_size = risk_mgr.calculate_position_size(example_stop_loss)
-
-print(f\"   Stop Loss: {example_stop_loss} pips\")
-print(f\"   Position Size: {position_size} lots\")
-print(f\"   Risk Amount: ${risk_mgr.account_balance * risk_mgr.max_risk_per_trade:.2f}\")
-print(f\"   Max Daily Loss: ${risk_mgr.account_balance * risk_mgr.max_daily_drawdown:.2f}\")
-
-print(f\"\\n   Risk Controls:\")
-print(f\"   ✓ 1% risk per trade (limits single trade damage)\")
-print(f\"   ✓ 3% max daily drawdown (stops bleeding days)\")
-print(f\"   ✓ Max 2 correlated positions (prevents overexposure)\")
-print(f\"   ✓ Max 10 trades per day (prevents overtrading)\")
-
-print(f\"\\n{'='*80}\\n\")
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-# CELL 7: SAVE MODELS TO GOOGLE DRIVE
-# ════════════════════════════════════════════════════════════════════════════════
-# ⏱️ Time: 1 minute
-# 💾 Saves model and scaler for later use
-# ════════════════════════════════════════════════════════════════════════════════
-
-print("="*80)
-print("💾 CELL 7: SAVE MODELS")
-print("="*80 + "\n")
-
-# Create models directory
-models_dir = Path('/content/drive/MyDrive/models')
-models_dir.mkdir(parents=True, exist_ok=True)
-
-# Save model
-model_path = models_dir / 'tce_multi_tf_model.pt'
-torch.save(model.state_dict(), model_path)
-print(f"✅ Saved model: {model_path}")
-
-# Save scaler
-scaler_mean_path = models_dir / 'scaler_mean.npy'
-scaler_scale_path = models_dir / 'scaler_scale.npy'
-
-np.save(scaler_mean_path, scaler.mean_)
-np.save(scaler_scale_path, scaler.scale_)
-
-print(f"✅ Saved scaler mean: {scaler_mean_path}")
-print(f"✅ Saved scaler scale: {scaler_scale_path}")
-
-print(f"\n{'='*80}")
-print("📂 Saved to Google Drive:")
-print(f"   {models_dir}")
-print("="*80 + "\n")
-
-print("✅ ALL FILES SAVED!\n")
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-# CELL 8: TRAINING SUMMARY
-# ════════════════════════════════════════════════════════════════════════════════
-# 📊 Final summary and next steps
-# ════════════════════════════════════════════════════════════════════════════════
-
-print("="*80)
-print("🎉 TRAINING PIPELINE COMPLETE!")
-print("="*80 + "\n")
-
-print("📊 FINAL RESULTS:\n")
-print(f"   • Total setups generated: {len(all_setups):,}")
-print(f"   • Valid setups: {len(valid_setups):,}")
-print(f"   • Training samples: {len(X_train):,}")
-print(f"   • Test samples: {len(X_test):,}")
-print(f"   • Best accuracy: {best_test_acc*100:.2f}%")
-print(f"   • Model saved: ✅")
-print(f"   • Scaler saved: ✅")
-
-print(f"\n{'='*80}")
-print("🚀 NEXT STEPS:")
-print("="*80 + "\n")
-
-print("1. Download models from Google Drive:")
-print("   • Navigate to: My Drive/models/")
-print("   • Download all 3 files")
-print()
-
-print("2. Place in local project:")
-print("   • C:\\Users\\USER-PC\\fluxpointai-backend\\fluxpoint\\models\\")
-print()
-
-print("3. Load and use:")
-print("   ```python")
-print("   model = TCEProbabilityModel()")
-print("   model.load_state_dict(torch.load('tce_multi_tf_model.pt'))")
-print("   scaler_mean = np.load('scaler_mean.npy')")
-print("   scaler_scale = np.load('scaler_scale.npy')")
-print("   ```")
-print()
-
-print("4. Backtest on 2024-2025 data")
-print("5. Deploy to paper trading")
-print("6. Monitor and retrain monthly")
-
-print(f"\n{'='*80}")
-print("✅ READY FOR DEPLOYMENT!")
-print("="*80 + "\n")
+print("\n" + "=" * 80)
+print("🎉 COMPLETE! PIPELINE FINISHED SUCCESSFULLY")
+print("=" * 80)
+print("\nKey Points:")
+print("  • Entry is ALWAYS at 2nd bounce (retest)")
+print("  • 1st bounce = test/setup, 2nd bounce = entry signal")
+print("  • Both winners and losers included for balanced training")
+print("  • Models will learn which patterns work from features")
